@@ -1,0 +1,11 @@
+id = "profitability_quality"
+name = "Profitability Quality"
+category = "quality"
+signal_direction = "higher_is_better"
+description = "Capture whether reported profitability is backed by stable margins, cash generation, and capital discipline."
+required_data = ["profitability_quality", "capital_efficiency"]
+preferred_horizon_days = [20, 60]
+normalization = ["industry_bucket", "winsorize", "zscore"]
+point_in_time_rule = "use_last_reported_financials_with_reporting_lag"
+failure_modes = ["temporary_margin_spike", "financial_statement_noise"]
+

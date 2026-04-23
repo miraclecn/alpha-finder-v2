@@ -1,0 +1,11 @@
+id = "accrual_quality"
+name = "Accrual Quality"
+category = "quality"
+signal_direction = "lower_accruals_are_better"
+description = "Penalize earnings quality that relies too heavily on accrual build-up rather than cash realization."
+required_data = ["accrual_quality"]
+preferred_horizon_days = [20, 60]
+normalization = ["industry_bucket", "winsorize", "zscore"]
+point_in_time_rule = "use_last_reported_financials_with_reporting_lag"
+failure_modes = ["working_capital_seasonality", "one_off_balance_sheet_reset"]
+

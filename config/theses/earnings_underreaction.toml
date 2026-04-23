@@ -1,0 +1,17 @@
+id = "earnings_underreaction"
+name = "Earnings And Event Underreaction"
+family = "event_alpha"
+mechanism = "The market underreacts to earnings surprises, pre-announcements, and operational inflection signals, creating drift over the following days to weeks."
+why_a_share = "Information diffusion is uneven across retail-heavy segments and post-event follow-through often persists beyond the first reaction day."
+expected_sign = "positive"
+expected_horizon_days = [5, 20]
+required_data = ["earnings_dates", "preannouncement_flags", "surprise_proxy", "gap_behavior", "turnover_confirmation"]
+regime_dependencies = ["better when event quality is high and liquidity is stable"]
+failure_modes = ["overnight_gap_already_fully_prices_information", "crowded_event_chasing"]
+falsification_rules = ["drift_does_not_survive_next_day_execution_and_cost_assumptions", "alpha_turns_negative_when_neutralized_by_size_and_industry"]
+portfolio_role = "medium-horizon event sleeve"
+
+[validation]
+primary_target = "5_to_20d_executable_residual_return_net_cost"
+cost_scenarios = ["base", "high"]
+must_pass_regimes = ["earnings_season", "non_earnings_season", "high_vol", "low_vol"]

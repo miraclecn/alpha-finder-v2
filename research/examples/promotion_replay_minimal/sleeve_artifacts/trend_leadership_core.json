@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "artifact_type": "sleeve_research_artifact",
+  "sleeve_id": "trend_leadership_core",
+  "mandate_id": "a_share_long_only_eod",
+  "target_id": "open_t1_to_open_t20_residual_net_cost",
+  "steps": [
+    {
+      "trade_date": "2026-04-06",
+      "records": [
+        {
+          "asset_id": "BBB",
+          "rank": 1,
+          "score": 9.2,
+          "target_weight": 0.55,
+          "realized_return": 0.02,
+          "cost_model_id": "base_a_share_cash",
+          "industry": "tech",
+          "trade_state": {
+            "can_enter": true,
+            "can_exit": true
+          }
+        },
+        {
+          "asset_id": "DDD",
+          "rank": 2,
+          "score": 8.4,
+          "target_weight": 0.45,
+          "realized_return": 0.03,
+          "cost_model_id": "base_a_share_cash",
+          "industry": "industrial",
+          "trade_state": {
+            "can_enter": true,
+            "can_exit": true
+          }
+        }
+      ]
+    },
+    {
+      "trade_date": "2026-04-13",
+      "records": [
+        {
+          "asset_id": "AAA",
+          "rank": 1,
+          "score": 9.0,
+          "target_weight": 0.4,
+          "realized_return": 0.015,
+          "cost_model_id": "base_a_share_cash",
+          "industry": "bank",
+          "trade_state": {
+            "can_enter": true,
+            "can_exit": true
+          }
+        },
+        {
+          "asset_id": "DDD",
+          "rank": 2,
+          "score": 8.3,
+          "target_weight": 0.6,
+          "realized_return": 0.02,
+          "cost_model_id": "base_a_share_cash",
+          "industry": "industrial",
+          "trade_state": {
+            "can_enter": true,
+            "can_exit": true
+          }
+        }
+      ]
+    },
+    {
+      "trade_date": "2026-04-20",
+      "records": [
+        {
+          "asset_id": "CCC",
+          "rank": 1,
+          "score": 9.1,
+          "target_weight": 0.5,
+          "realized_return": 0.015,
+          "cost_model_id": "base_a_share_cash",
+          "industry": "tech",
+          "trade_state": {
+            "can_enter": true,
+            "can_exit": true
+          }
+        },
+        {
+          "asset_id": "EEE",
+          "rank": 2,
+          "score": 8.2,
+          "target_weight": 0.5,
+          "realized_return": 0.025,
+          "cost_model_id": "base_a_share_cash",
+          "industry": "industrial",
+          "trade_state": {
+            "can_enter": true,
+            "can_exit": true
+          }
+        }
+      ]
+    }
+  ]
+}

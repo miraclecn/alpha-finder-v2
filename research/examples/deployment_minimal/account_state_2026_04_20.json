@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "artifact_type": "account_state_snapshot",
+  "account_id": "shadow_a_share_cash",
+  "as_of_date": "2026-04-20",
+  "total_equity_cny": 10000000.0,
+  "cash_balance_cny": 1200000.0,
+  "available_cash_cny": 1200000.0,
+  "positions": [
+    {
+      "asset_id": "AAA",
+      "shares": 300000.0,
+      "available_shares": 300000.0,
+      "market_value_cny": 3000000.0
+    },
+    {
+      "asset_id": "BBB",
+      "shares": 280000.0,
+      "available_shares": 280000.0,
+      "market_value_cny": 2800000.0
+    },
+    {
+      "asset_id": "CCC",
+      "shares": 200000.0,
+      "available_shares": 200000.0,
+      "market_value_cny": 2000000.0
+    },
+    {
+      "asset_id": "DDD",
+      "shares": 100000.0,
+      "available_shares": 0.0,
+      "market_value_cny": 1000000.0
+    }
+  ],
+  "trade_restrictions": [
+    {
+      "asset_id": "DDD",
+      "can_enter": true,
+      "can_exit": false,
+      "reason": "suspended"
+    }
+  ]
+}

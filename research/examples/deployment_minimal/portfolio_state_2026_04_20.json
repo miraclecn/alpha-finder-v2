@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "artifact_type": "portfolio_state_snapshot",
+  "portfolio_id": "research_example_candidate_portfolio",
+  "account_id": "shadow_a_share_cash",
+  "as_of_date": "2026-04-20",
+  "cash_weight": 0.12,
+  "blocked_entry_assets": [],
+  "blocked_exit_assets": [
+    "DDD"
+  ],
+  "holdings": [
+    {
+      "asset_id": "AAA",
+      "weight": 0.3
+    },
+    {
+      "asset_id": "BBB",
+      "weight": 0.28
+    },
+    {
+      "asset_id": "CCC",
+      "weight": 0.2
+    },
+    {
+      "asset_id": "DDD",
+      "weight": 0.1
+    }
+  ]
+}

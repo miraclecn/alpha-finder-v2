@@ -1,0 +1,10 @@
+id = "a_share_next_open_v1"
+name = "A-Share Next-Open Weight Release"
+description = "Convert an approved end-of-day portfolio target into next-session open weight deltas while carrying blocked positions and residual cash honestly."
+trade_timing = "next_day_open"
+order_basis = "weight_delta"
+blocked_trade_policy = "carry_positions"
+cash_policy = "hold_residual_cash"
+participation_cap_source = "mandate_or_cost_model"
+lot_size = 100
+min_trade_weight = 0.0025

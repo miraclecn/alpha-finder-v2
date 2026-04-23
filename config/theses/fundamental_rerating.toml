@@ -1,0 +1,17 @@
+id = "fundamental_rerating"
+name = "Fundamental Rerating"
+family = "slow_alpha"
+mechanism = "Cheap but not broken companies rerate as balance-sheet quality, cash-flow credibility, and normalized earning power become clearer to the market."
+why_a_share = "Retail participation and style rotation can leave high-quality but temporarily neglected companies mispriced for months, but the edge is slow and best used as an anchor instead of a fast trading signal."
+expected_sign = "positive"
+expected_horizon_days = [20, 90]
+required_data = ["sector_relative_valuation", "profitability_quality", "accrual_quality", "leverage", "capital_efficiency"]
+regime_dependencies = ["works better outside panic deleveraging", "needs accounting credibility and sector comparability", "best used with conservative reporting lags"]
+failure_modes = ["value_trap_cluster", "cyclical_earnings_peak", "balance_sheet_deterioration", "stale_accounting_signal"]
+falsification_rules = ["net_of_cost_residual_alpha_is_negative_for_two_consecutive_validation_windows", "payoff_disappears_after_quality_and_leverage_controls"]
+portfolio_role = "slow quality/value anchor sleeve and veto source"
+
+[validation]
+primary_target = "20_to_60d_executable_residual_return_net_cost"
+cost_scenarios = ["base", "high"]
+must_pass_regimes = ["bull", "bear", "high_dispersion", "low_dispersion"]

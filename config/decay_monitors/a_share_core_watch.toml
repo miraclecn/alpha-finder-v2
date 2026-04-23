@@ -1,0 +1,19 @@
+id = "a_share_core_watch"
+name = "A-Share Core Portfolio Decay Watch"
+description = "Monitor whether a promoted portfolio remains inside the return, drawdown, turnover, breadth, and tradeability envelope that justified promotion."
+comparison_mode = "promotion_snapshot"
+observation_windows = [5, 20, 60]
+
+[warning_thresholds]
+min_ir_ratio = 0.60
+max_drawdown_multiple = 1.50
+max_turnover_vs_budget = 1.25
+min_breadth_ratio = 0.60
+max_blocked_name_share = 0.10
+
+[retirement_thresholds]
+min_ir_ratio = 0.25
+max_drawdown_multiple = 2.00
+max_turnover_vs_budget = 1.75
+min_breadth_ratio = 0.40
+max_blocked_name_share = 0.20

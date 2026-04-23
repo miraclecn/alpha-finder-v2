@@ -1,0 +1,11 @@
+id = "post_earnings_drift_signal"
+name = "Post Earnings Drift Signal"
+category = "event"
+signal_direction = "positive_surprise_is_better"
+description = "Capture the persistence of earnings surprise when prices have not fully incorporated the new information by the close."
+required_data = ["earnings_surprise", "post_event_gap", "turnover_reaction"]
+preferred_horizon_days = [5, 10]
+normalization = ["cross_sectional", "winsorize", "zscore"]
+point_in_time_rule = "use_only_events_published_before_research_cutoff"
+failure_modes = ["limit_up_lock", "overnight_news_reversal"]
+

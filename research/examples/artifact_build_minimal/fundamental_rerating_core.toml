@@ -1,0 +1,8 @@
+schema_version = 1
+artifact_type = "sleeve_artifact_build_case"
+
+case_id = "fundamental_rerating_core_build"
+description = "Build the slower quality/value anchor sleeve artifact from normalized decision-calendar observations."
+sleeve_path = "config/sleeves/fundamental_rerating_core.toml"
+input_path = "research/examples/artifact_build_minimal/fundamental_rerating_core_input.json"
+output_path = "research/examples/promotion_replay_minimal/sleeve_artifacts/fundamental_rerating_core.json"

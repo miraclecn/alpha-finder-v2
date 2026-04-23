@@ -1,0 +1,27 @@
+# Minimal Promotion Replay Example
+
+This directory is the first persisted end-to-end V2 replay case.
+
+The sleeve artifacts under `sleeve_artifacts/` are generated outputs.
+Their source build cases now live under `research/examples/artifact_build_minimal/`.
+
+Files:
+
+- `baseline_portfolio.toml`: baseline production book before sleeve admission
+- `candidate_portfolio.toml`: proposed book after sleeve admission
+- `replay_case.toml`: scenario binding for replay
+- `benchmark_state_history.json`: PIT benchmark history used by the constructor, including per-date industry weights and constituent context
+- `sleeve_artifacts/*.json`: decision-calendar research artifacts for each sleeve
+
+Run:
+
+```bash
+cd /home/nan/alpha-find-v2
+PYTHONPATH=src python -m alpha_find_v2 build-sleeve-artifact --case research/examples/artifact_build_minimal/fundamental_rerating_core.toml
+PYTHONPATH=src python -m alpha_find_v2 build-sleeve-artifact --case research/examples/artifact_build_minimal/trend_leadership_core.toml
+PYTHONPATH=src python -m alpha_find_v2 run-promotion-replay --case research/examples/promotion_replay_minimal/replay_case.toml
+```
+
+The example uses a narrow research-only promotion gate and an explicit turnover budget.
+That is intentional.
+Its purpose is to prove the persisted replay spine, not to stand in for the final production gate.

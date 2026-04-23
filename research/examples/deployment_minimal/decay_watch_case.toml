@@ -1,0 +1,27 @@
+schema_version = 1
+artifact_type = "decay_watch_case"
+
+case_id = "candidate_portfolio_shadow_watch_20d"
+description = "Evaluate whether the candidate portfolio's recent shadow-live window still sits inside the promotion envelope."
+portfolio_path = "research/examples/promotion_replay_minimal/candidate_portfolio.toml"
+evaluation_date = "2026-05-18"
+window_label = "20d_shadow"
+
+[promotion_snapshot]
+oos_ir = 1.10
+oos_tstat = 2.20
+breadth = 5
+peak_to_trough_drawdown = 0.07
+turnover_budget = 0.70
+realized_turnover_vs_budget = 0.95
+
+[realized_summary]
+periods = 20
+average_return = 0.0020
+volatility = 0.0100
+ir = 0.68
+tstat = 1.35
+peak_to_trough_drawdown = 0.09
+breadth = 4
+average_turnover = 0.62
+blocked_name_share = 0.06

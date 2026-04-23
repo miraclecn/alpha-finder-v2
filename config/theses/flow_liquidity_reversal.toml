@@ -1,0 +1,17 @@
+id = "flow_liquidity_reversal"
+name = "Flow And Liquidity Reversal"
+family = "fast_alpha"
+mechanism = "Temporary order-imbalance and retail flow pressure dislocate prices, followed by mean reversion when the pressure fades."
+why_a_share = "Retail-dominated flow, price-limit behavior, and episodic crowding can create short-lived but repeatable dislocations."
+expected_sign = "positive"
+expected_horizon_days = [1, 5]
+required_data = ["turnover_shock", "abnormal_volume", "gap_proxy", "price_limit_state", "crowding_proxy"]
+regime_dependencies = ["needs strong tradeability filters and realistic slippage assumptions"]
+failure_modes = ["slippage_consumes_edge", "locked_limit_states_block_exit", "signal_is_only_a_small_cap_liquidity_premium"]
+falsification_rules = ["gross_alpha_does_not_survive_tradeability_and_slippage_model", "payoff_vanishes_after_liquidity_and_reversal_controls"]
+portfolio_role = "gated fast sleeve"
+
+[validation]
+primary_target = "1_to_5d_executable_residual_return_net_cost"
+cost_scenarios = ["base", "high", "stress"]
+must_pass_regimes = ["high_liquidity", "low_liquidity", "post_limit", "normal"]

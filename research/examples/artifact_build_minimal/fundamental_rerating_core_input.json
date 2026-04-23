@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "artifact_type": "sleeve_research_observation_input",
+  "steps": [
+    {
+      "trade_date": "2026-04-06",
+      "records": [
+        {
+          "asset_id": "AAA",
+          "rank": 1,
+          "score": 9.0,
+          "target_weight": 0.6,
+          "entry_open": 10.0,
+          "exit_open": 10.124,
+          "industry": "bank",
+          "residual_components": {
+            "benchmark": 0.0,
+            "industry": 0.0,
+            "size": 0.0,
+            "beta": 0.0
+          }
+        },
+        {
+          "asset_id": "BBB",
+          "rank": 2,
+          "score": 8.0,
+          "target_weight": 0.4,
+          "entry_open": 10.0,
+          "exit_open": 10.224,
+          "industry": "tech",
+          "residual_components": {
+            "benchmark": 0.0,
+            "industry": 0.0,
+            "size": 0.0,
+            "beta": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "trade_date": "2026-04-13",
+      "records": [
+        {
+          "asset_id": "AAA",
+          "rank": 1,
+          "score": 9.0,
+          "target_weight": 0.5,
+          "entry_open": 10.0,
+          "exit_open": 10.174,
+          "industry": "bank",
+          "residual_components": {
+            "benchmark": 0.0,
+            "industry": 0.0,
+            "size": 0.0,
+            "beta": 0.0
+          }
+        },
+        {
+          "asset_id": "CCC",
+          "rank": 2,
+          "score": 8.0,
+          "target_weight": 0.5,
+          "entry_open": 10.0,
+          "exit_open": 10.124,
+          "industry": "tech",
+          "residual_components": {
+            "benchmark": 0.0,
+            "industry": 0.0,
+            "size": 0.0,
+            "beta": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "trade_date": "2026-04-20",
+      "records": [
+        {
+          "asset_id": "BBB",
+          "rank": 1,
+          "score": 9.0,
+          "target_weight": 0.6,
+          "entry_open": 10.0,
+          "exit_open": 9.924,
+          "industry": "tech",
+          "residual_components": {
+            "benchmark": 0.0,
+            "industry": 0.0,
+            "size": 0.0,
+            "beta": 0.0
+          }
+        },
+        {
+          "asset_id": "CCC",
+          "rank": 2,
+          "score": 8.0,
+          "target_weight": 0.4,
+          "entry_open": 10.0,
+          "exit_open": 10.174,
+          "industry": "tech",
+          "residual_components": {
+            "benchmark": 0.0,
+            "industry": 0.0,
+            "size": 0.0,
+            "beta": 0.0
+          }
+        }
+      ]
+    }
+  ]
+}

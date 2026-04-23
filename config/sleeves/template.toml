@@ -1,0 +1,19 @@
+id = "template"
+name = "Sleeve Template"
+mandate_id = "a_share_long_only_eod"
+thesis_id = "template"
+universe = "investable_a_share_core"
+rebalance_frequency = "weekly"
+target_holding_days = 20
+turnover_budget = 0.15
+execution_rule = "next_day_open"
+neutralization = ["industry", "size", "beta"]
+
+[construction]
+selection = "score_to_weight"
+holding_count = 20
+weight_cap = 0.08
+
+[constraints]
+min_median_daily_turnover_cny_mn = 30
+exclude_price_limit_lock = true

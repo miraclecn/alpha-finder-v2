@@ -1,0 +1,22 @@
+id = "research_example_replay_gate"
+name = "Research Example Replay Gate"
+scope = "portfolio"
+description = "Narrow gate for the minimal replay example so the end-to-end path can be demonstrated before full production thresholds are calibrated."
+minimum_oos_ir = 0.0
+minimum_oos_tstat = 0.0
+minimum_breadth = 5
+max_peak_to_trough_drawdown = 0.10
+cost_scenarios = ["base"]
+regime_requirements = ["bull"]
+
+[correlation_limits]
+max_component_correlation = 0.80
+max_to_existing_portfolio = 0.70
+
+[turnover_limits]
+max_realized_vs_budget = 1.10
+max_names_with_limit_lock_share = 0.20
+
+[portfolio_contribution]
+minimum_marginal_ir_delta = 0.10
+max_marginal_drawdown_increase = 0.02

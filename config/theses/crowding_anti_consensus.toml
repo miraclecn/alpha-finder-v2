@@ -1,0 +1,17 @@
+id = "crowding_anti_consensus"
+name = "Crowding And Anti-Consensus"
+family = "medium_alpha"
+mechanism = "Crowded winners and fashionable names underperform when breadth weakens or flow reverses, while neglected improving names rerate."
+why_a_share = "Theme rotation and crowded retail consensus often overshoot fundamentals, especially in narrower market segments."
+expected_sign = "positive"
+expected_horizon_days = [5, 30]
+required_data = ["ownership_crowding_proxy", "flow_saturation", "valuation_stretch", "breadth", "financing_pressure"]
+regime_dependencies = ["works best when crowding is measurable and breadth begins to deteriorate"]
+failure_modes = ["crowding_proxy_is_too_noisy", "anti_consensus_becomes_generic_small_cap_bias"]
+falsification_rules = ["alpha_disappears_after_crowding_proxy_redefinition", "returns_are_explained_by_benchmark_beta_and_size_tilt"]
+portfolio_role = "diversifying medium-horizon sleeve"
+
+[validation]
+primary_target = "5_to_30d_executable_residual_return_net_cost"
+cost_scenarios = ["base", "high"]
+must_pass_regimes = ["crowded", "uncrowded", "risk_on", "risk_off"]

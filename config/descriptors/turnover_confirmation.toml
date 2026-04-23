@@ -1,0 +1,10 @@
+id = "turnover_confirmation"
+name = "Turnover Confirmation"
+category = "liquidity_confirmation"
+signal_direction = "higher_is_better"
+description = "Require healthy turnover participation so the sleeve prefers liquid leadership over fragile illiquid mark-up behavior."
+required_data = ["daily_bar", "daily_basic", "tradeability_state"]
+preferred_horizon_days = [10, 30]
+normalization = ["cross_sectional", "winsorize", "zscore"]
+point_in_time_rule = "use_only_turnover_and_tradeability_state_known_at_trade_date_close"
+failure_modes = ["late_stage_volume_exhaustion", "limit_lock_false_confirmation"]

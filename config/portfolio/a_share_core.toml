@@ -1,0 +1,22 @@
+id = "a_share_core"
+name = "A-share Core Multi-Sleeve Portfolio"
+mandate_id = "a_share_long_only_eod"
+benchmark = "CSI 800"
+rebalance_policy = "staggered_weekly"
+description = "Initial V2 production portfolio that combines a medium-horizon trend-leadership sleeve with a slow quality/value anchor."
+construction_model_id = "a_share_core_blend"
+execution_policy_id = "a_share_next_open_v1"
+decay_monitor_id = "a_share_core_watch"
+sleeves = ["fundamental_rerating_core", "trend_leadership_core"]
+promotion_gate_id = "a_share_core_portfolio_gate"
+
+[allocation]
+fundamental_rerating_core = 0.30
+trend_leadership_core = 0.70
+
+[constraints]
+max_names = 24
+max_single_name_weight = 0.08
+max_industry_overweight = 0.10
+cash_buffer = 0.02
+turnover_penalty = "enabled"

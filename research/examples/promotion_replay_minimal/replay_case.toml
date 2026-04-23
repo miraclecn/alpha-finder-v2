@@ -1,0 +1,25 @@
+schema_version = 1
+artifact_type = "portfolio_promotion_replay_case"
+case_id = "promotion_replay_minimal"
+description = "Minimal persisted replay case that loads sleeve artifacts from disk and compares a baseline book against a proposed book."
+baseline_portfolio_path = "research/examples/promotion_replay_minimal/baseline_portfolio.toml"
+candidate_portfolio_path = "research/examples/promotion_replay_minimal/candidate_portfolio.toml"
+default_cost_model_path = "config/cost_models/base_a_share_cash.toml"
+additional_cost_model_paths = [
+  "config/cost_models/high_a_share_cash.toml",
+]
+benchmark_state_path = "research/examples/promotion_replay_minimal/benchmark_state_history.json"
+artifact_paths = [
+  "research/examples/promotion_replay_minimal/sleeve_artifacts/fundamental_rerating_core.json",
+  "research/examples/promotion_replay_minimal/sleeve_artifacts/trend_leadership_core.json",
+]
+periods_per_year = 52
+max_component_correlation = 0.35
+correlation_to_existing_portfolio = 0.25
+turnover_budget = 0.70
+
+[cost_scenario_pass]
+base = true
+
+[regime_pass]
+bull = true

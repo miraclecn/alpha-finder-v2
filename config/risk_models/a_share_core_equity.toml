@@ -1,0 +1,33 @@
+id = "a_share_core_equity"
+name = "A-share Core Equity Residualization Model"
+description = "Versioned V2 common-return model for A-share long-only research labels and portfolio diagnostics."
+benchmark = "CSI 800"
+factor_return_source = "external_snapshot"
+minimum_coverage = 120
+residual_components = ["benchmark", "industry", "size", "beta"]
+
+[[factors]]
+id = "benchmark"
+kind = "market"
+component = "benchmark"
+description = "Benchmark return leg removed from stock forward returns."
+
+[[factors]]
+id = "industry"
+kind = "industry"
+component = "industry"
+description = "Dynamic industry bucket factor keyed as industry:<bucket>."
+dynamic = true
+exposure_key_prefix = "industry"
+
+[[factors]]
+id = "size"
+kind = "style"
+component = "size"
+description = "Cross-sectional size exposure."
+
+[[factors]]
+id = "beta"
+kind = "style"
+component = "beta"
+description = "Trailing market beta exposure."

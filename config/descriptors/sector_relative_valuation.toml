@@ -1,0 +1,11 @@
+id = "sector_relative_valuation"
+name = "Sector Relative Valuation"
+category = "valuation"
+signal_direction = "cheaper_is_better"
+description = "Measure how cheap a company is relative to its industry peers after removing obvious distress candidates."
+required_data = ["sector_relative_valuation"]
+preferred_horizon_days = [20, 60]
+normalization = ["industry_bucket", "winsorize", "zscore"]
+point_in_time_rule = "use_last_reported_financials_with_reporting_lag"
+failure_modes = ["value_trap_cluster", "cyclical_peak_earnings"]
+

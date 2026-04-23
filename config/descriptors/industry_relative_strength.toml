@@ -1,0 +1,10 @@
+id = "industry_relative_strength"
+name = "Industry Relative Strength"
+category = "price_trend"
+signal_direction = "higher_is_better"
+description = "Confirm that a stock is leading within its own industry instead of riding an unrelated market-wide move."
+required_data = ["daily_bar", "industry_membership"]
+preferred_horizon_days = [10, 30]
+normalization = ["industry_bucket", "winsorize", "zscore"]
+point_in_time_rule = "use_only_historical_industry_membership_known_at_trade_date_close"
+failure_modes = ["industry_bubble_chase", "single_day_sector_news_spike"]

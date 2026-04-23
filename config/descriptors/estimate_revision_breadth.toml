@@ -1,0 +1,11 @@
+id = "estimate_revision_breadth"
+name = "Estimate Revision Breadth"
+category = "expectation_revision"
+signal_direction = "higher_is_better"
+description = "Track whether earnings expectation changes are broad-based enough to imply underreaction rather than one-off noise."
+required_data = ["earnings_revision", "analyst_breadth"]
+preferred_horizon_days = [5, 10]
+normalization = ["cross_sectional", "winsorize", "zscore"]
+point_in_time_rule = "use_only_revision_state_known_before_close"
+failure_modes = ["single_analyst_jump", "coverage_drop_distortion"]
+

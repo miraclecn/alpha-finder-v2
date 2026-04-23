@@ -1,0 +1,10 @@
+id = "high_a_share_cash"
+name = "High A-share Cash Cost"
+description = "Conservative high-cost scenario for event-driven or less liquid A-share cash-equity execution."
+buy_commission_bps = 2.0
+sell_commission_bps = 2.0
+buy_slippage_bps = 10.0
+sell_slippage_bps = 12.0
+sell_stamp_duty_bps = 10.0
+participation_cap = 0.08
+min_median_daily_turnover_cny_mn = 50.0

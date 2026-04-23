@@ -1,0 +1,17 @@
+id = "template"
+name = "Thesis Template"
+family = "template"
+mechanism = "Describe the mispricing mechanism, not the formula."
+why_a_share = "Explain why the edge should exist specifically in A-shares."
+expected_sign = "positive"
+expected_horizon_days = [5, 20]
+required_data = ["market_data", "point_in_time_fundamentals"]
+regime_dependencies = ["market_regime"]
+failure_modes = ["mechanism_break"]
+falsification_rules = ["state the condition that retires the thesis"]
+portfolio_role = "candidate sleeve"
+
+[validation]
+primary_target = "future_executable_residual_return_net_cost"
+cost_scenarios = ["low", "base", "high"]
+must_pass_regimes = ["bull", "bear", "high_vol", "low_vol"]

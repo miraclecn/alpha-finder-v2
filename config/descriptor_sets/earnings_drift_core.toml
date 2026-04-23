@@ -1,0 +1,19 @@
+id = "earnings_drift_core"
+name = "Earnings Drift Core Descriptor Set"
+thesis_id = "earnings_underreaction"
+target_id = "open_t1_to_open_t05_residual_net_cost"
+required_data = ["earnings_revision", "analyst_breadth", "earnings_surprise", "post_event_gap", "turnover_reaction"]
+selection_logic = "event_confirmation_then_composite_rank"
+
+[[components]]
+descriptor_id = "estimate_revision_breadth"
+role = "expectation_reset"
+weight = 0.45
+transform = "cross_sectional_zscore"
+
+[[components]]
+descriptor_id = "post_earnings_drift_signal"
+role = "price_underreaction_confirmation"
+weight = 0.55
+transform = "cross_sectional_zscore"
+

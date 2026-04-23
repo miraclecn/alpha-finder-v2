@@ -1,0 +1,12 @@
+id = "open_t1_to_open_t05_residual_net_cost"
+name = "Next-Day Open To 5-Day Open Residual Return Net Cost"
+description = "Research target for event underreaction sleeves that must survive a shorter holding period and tighter cost scrutiny."
+horizon_days = 5
+signal_observation = "trade_date_close"
+trade_entry = "next_day_open"
+trade_exit = "open_on_horizon"
+return_basis = "open_to_open"
+cost_model = "high_a_share_cash"
+risk_model_id = "a_share_core_equity"
+residualization = ["benchmark", "industry", "size", "beta"]
+eligibility = ["not_suspended", "not_limit_locked", "liquidity_pass"]

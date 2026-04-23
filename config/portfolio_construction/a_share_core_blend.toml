@@ -1,0 +1,8 @@
+id = "a_share_core_blend"
+name = "A-share Core Sleeve Blend"
+description = "Versioned multi-sleeve construction policy for the first V2 production portfolio."
+sleeve_weight_source = "portfolio_allocation"
+overlap_mode = "sum"
+name_selection = "top_weight"
+excess_weight_policy = "hold_cash"
+industry_budget_mode = "benchmark_relative"

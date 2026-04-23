@@ -1,0 +1,33 @@
+id = "trend_leadership"
+name = "Trend Leadership"
+family = "medium_alpha"
+mechanism = "Stocks with persistent medium-horizon relative strength, orderly pullbacks, and industry leadership often continue to outperform as information diffuses and capital keeps following winners."
+why_a_share = "A-share leadership often persists for weeks because retail theme participation, benchmark chasing, and delayed information digestion reinforce strong names beyond the initial move."
+expected_sign = "positive"
+expected_horizon_days = [10, 30]
+required_data = [
+  "medium_term_relative_strength",
+  "industry_relative_strength",
+  "trend_stability",
+  "turnover_confirmation",
+  "tradeability_state",
+]
+regime_dependencies = [
+  "works better when benchmark trend and breadth are supportive",
+  "should be de-risked when leadership narrows or volatility spikes",
+]
+failure_modes = [
+  "late_stage_blowoff_move",
+  "single_theme_crowding",
+  "market_regime_break",
+]
+falsification_rules = [
+  "net_of_cost_residual_alpha_is_negative_for_two_consecutive_validation_windows",
+  "alpha_disappears_after_industry_and_size_controls",
+]
+portfolio_role = "primary medium-horizon alpha sleeve"
+
+[validation]
+primary_target = "20d_executable_residual_return_net_cost"
+cost_scenarios = ["base", "high"]
+must_pass_regimes = ["bull", "bear", "high_dispersion", "low_dispersion"]

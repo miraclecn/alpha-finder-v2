@@ -1,0 +1,10 @@
+id = "base_a_share_cash"
+name = "Base A-share Cash Cost"
+description = "Base-case personal-account A-share cash-equity cost model for next-day-open execution."
+buy_commission_bps = 1.5
+sell_commission_bps = 1.5
+buy_slippage_bps = 5.0
+sell_slippage_bps = 6.0
+sell_stamp_duty_bps = 10.0
+participation_cap = 0.10
+min_median_daily_turnover_cny_mn = 30.0

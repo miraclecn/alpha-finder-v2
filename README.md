@@ -1,0 +1,93 @@
+# alpha-find-v2
+
+Finance-first rebuild of a personal A-share quant trading system.
+
+This repo starts from the economic object you actually trade, not from symbolic factor generation. The V2 core model is:
+
+`mandate -> thesis -> descriptor set -> sleeve -> portfolio recipe -> executable signal -> decay record`
+
+## First Product
+
+The first production target is deliberately narrow:
+
+- market: China A-shares
+- direction: long-only cash equities
+- execution style: end-of-day research, next-day open execution
+- holdings: 15-30 names
+- cadence: weekly or 2-3 times per week
+- risk stance: industry and size controlled, turnover budgeted, A-share constraints explicit
+
+## Current Research Doctrine
+
+The first production research stack is constrained by what a personal system can actually source and maintain:
+
+- core alpha: price/volume-driven medium-horizon stock selection
+- slow anchor: lagged quality/value rerating used as a slower sleeve and veto source
+- overlay: portfolio-level regime and tradeability control
+- deferred: same-day earnings/event, message/news, and fragile flow/crowding pipelines
+
+In practice, V2 now treats `Tushare 2000` daily data as the production truth layer and uses slower fundamentals only with conservative reporting-lag rules.
+
+## Repo Layout
+
+- `config/mandates`: live trading mandates
+- `config/theses`: economically underwritten alpha theses
+- `config/descriptors`: atomic, point-in-time-safe research measurements
+- `config/descriptor_sets`: thesis-specific descriptor bundles
+- `config/cost_models`: versioned A-share cash-equity cost assumptions
+- `config/execution_policies`: versioned rules for turning approved weights into tradable release packages
+- `config/portfolio_construction`: versioned sleeve-combination and hard-cap policies
+- `config/risk_models`: versioned common-return models used for residualization
+- `config/sleeves`: tradable sleeves linked to a thesis and mandate
+- `config/targets`: executable residual return definitions aligned to trade timing and costs
+- `config/portfolio`: multi-sleeve portfolio recipes
+- `config/promotion_gates`: portfolio-level promotion criteria for sleeve admission
+- `config/decay_monitors`: versioned rules for post-promotion watch and retirement decisions
+- `docs/architecture`: system principles and operating model
+- `docs/data`: V2 data boundary and PIT audit rules
+- `docs/migration`: V1 to V2 boundary documents
+- `research/examples`: persisted replay and deployment cases plus sample sleeve, benchmark-state, and account-state artifacts
+- `research/examples/artifact_build_minimal`: build cases that emit standardized sleeve artifacts from normalized research observations
+- `research/examples/deployment_minimal`: deployment cases plus account-state and portfolio-state snapshots that bind the live book to the executable package
+- `src/alpha_find_v2`: loaders plus portfolio construction, simulation, deployment, artifact I/O, and promotion replay primitives
+- `docs/data/v1-duckdb-reuse-audit.md`: explicit V1 DuckDB reuse findings and V2 source-DB decisions
+- `tests`: config and loader verification
+
+## Quick Start
+
+```bash
+cd /home/nan/alpha-find-v2
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e .
+python3 -m unittest discover -s tests -v
+PYTHONPATH=src python -m alpha_find_v2 list-theses
+PYTHONPATH=src python -m alpha_find_v2 list-descriptor-sets
+PYTHONPATH=src python -m alpha_find_v2 show-cost-model --path config/cost_models/base_a_share_cash.toml
+PYTHONPATH=src python -m alpha_find_v2 show-execution-policy --path config/execution_policies/a_share_next_open_v1.toml
+PYTHONPATH=src python -m alpha_find_v2 show-benchmark-state --path research/examples/promotion_replay_minimal/benchmark_state_history.json
+PYTHONPATH=src python -m alpha_find_v2 show-account-state --path research/examples/deployment_minimal/account_state_2026_04_20.json
+PYTHONPATH=src python -m alpha_find_v2 show-portfolio-state --path research/examples/deployment_minimal/portfolio_state_2026_04_20.json
+PYTHONPATH=src python -m alpha_find_v2 show-portfolio-construction-model --path config/portfolio_construction/a_share_core_blend.toml
+PYTHONPATH=src python -m alpha_find_v2 show-risk-model --path config/risk_models/a_share_core_equity.toml
+PYTHONPATH=src python -m alpha_find_v2 show-target --path config/targets/open_t1_to_open_t20_residual_net_cost.toml
+PYTHONPATH=src python -m alpha_find_v2 show-decay-monitor --path config/decay_monitors/a_share_core_watch.toml
+PYTHONPATH=src python -m alpha_find_v2 build-research-source-db --source-db /home/nan/alpha-find/output/stock_data_audited.duckdb --target-db output/research_source.duckdb
+PYTHONPATH=src python -m alpha_find_v2 build-sleeve-artifact --case research/examples/artifact_build_minimal/fundamental_rerating_core.toml
+PYTHONPATH=src python -m alpha_find_v2 build-sleeve-artifact --case research/examples/artifact_build_minimal/trend_leadership_core.toml
+PYTHONPATH=src python -m alpha_find_v2 show-sleeve-artifact --path research/examples/promotion_replay_minimal/sleeve_artifacts/trend_leadership_core.json
+PYTHONPATH=src python -m alpha_find_v2 run-promotion-replay --case research/examples/promotion_replay_minimal/replay_case.toml
+PYTHONPATH=src python -m alpha_find_v2 build-executable-signal --case research/examples/deployment_minimal/executable_signal_case.toml
+PYTHONPATH=src python -m alpha_find_v2 evaluate-decay-watch --case research/examples/deployment_minimal/decay_watch_case.toml
+```
+
+If `pytest` is installed in your environment, `pytest -q` is also valid.
+
+## Operating Principle
+
+V2 is thesis-first and portfolio-first. Legacy V1 outputs may be used as a comparison baseline, but they are not treated as investable alpha assets.
+
+The main V2 control chain now reaches the deployment boundary:
+
+`mandate -> thesis -> descriptor set -> sleeve -> portfolio recipe -> executable signal -> decay record`

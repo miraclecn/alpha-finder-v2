@@ -1,0 +1,9 @@
+schema_version = 1
+artifact_type = "sleeve_artifact_build_case"
+
+case_id = "trend_leadership_core_build"
+description = "Build the medium-horizon trend-leadership sleeve artifact from normalized decision-calendar observations."
+sleeve_path = "config/sleeves/trend_leadership_core.toml"
+input_path = "research/examples/artifact_build_minimal/trend_leadership_core_input.json"
+output_path = "research/examples/promotion_replay_minimal/sleeve_artifacts/trend_leadership_core.json"
+

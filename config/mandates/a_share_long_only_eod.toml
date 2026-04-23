@@ -1,0 +1,29 @@
+id = "a_share_long_only_eod"
+name = "A-share Long-Only EOD Core"
+market = "CN-A"
+benchmark = "CSI 800"
+account_type = "cash_equity"
+description = "Personal-account A-share stock-selection mandate for end-of-day research and next-day execution."
+allowed_instruments = ["stock"]
+rebalance_days_per_week = 2
+holding_count_min = 15
+holding_count_max = 30
+max_single_name_weight = 0.08
+max_turnover_per_rebalance = 0.25
+trade_timing = "next_day_open"
+execution_participation_cap = 0.10
+
+[filters]
+exclude_st = true
+exclude_suspended = true
+exclude_limit_up_locked = true
+exclude_limit_down_locked = true
+min_listing_days = 120
+min_median_daily_turnover_cny_mn = 30
+
+[risk]
+industry_neutral = true
+size_control = true
+beta_band = [0.85, 1.15]
+max_industry_overweight = 0.10
+cash_buffer = 0.02

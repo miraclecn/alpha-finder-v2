@@ -1,0 +1,36 @@
+id = "fundamental_rerating_core"
+name = "Fundamental Rerating Anchor Descriptor Set"
+thesis_id = "fundamental_rerating"
+target_id = "open_t1_to_open_t20_residual_net_cost"
+required_data = [
+  "sector_relative_valuation",
+  "profitability_quality",
+  "accrual_quality",
+  "leverage",
+  "capital_efficiency",
+]
+selection_logic = "quality_screen_then_anchor_rank"
+
+[[components]]
+descriptor_id = "sector_relative_valuation"
+role = "cheapness_anchor"
+weight = 0.35
+transform = "sector_relative_zscore"
+
+[[components]]
+descriptor_id = "profitability_quality"
+role = "quality_confirmation"
+weight = 0.30
+transform = "industry_neutral_zscore"
+
+[[components]]
+descriptor_id = "accrual_quality"
+role = "earnings_quality_guardrail"
+weight = 0.20
+transform = "industry_neutral_zscore"
+
+[[components]]
+descriptor_id = "leverage_conservatism"
+role = "balance_sheet_guardrail"
+weight = 0.15
+transform = "industry_neutral_zscore"

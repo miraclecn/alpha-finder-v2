@@ -1,0 +1,22 @@
+id = "a_share_core_portfolio_gate"
+name = "A-share Core Portfolio Promotion Gate"
+scope = "portfolio"
+description = "A sleeve can only be promoted if it improves the production portfolio after costs, risk controls, and diversification limits."
+minimum_oos_ir = 0.35
+minimum_oos_tstat = 2.0
+minimum_breadth = 80
+max_peak_to_trough_drawdown = 0.18
+cost_scenarios = ["base", "high"]
+regime_requirements = ["bull", "bear", "high_dispersion", "low_dispersion"]
+
+[correlation_limits]
+max_component_correlation = 0.75
+max_to_existing_portfolio = 0.60
+
+[turnover_limits]
+max_realized_vs_budget = 1.10
+max_names_with_limit_lock_share = 0.10
+
+[portfolio_contribution]
+minimum_marginal_ir_delta = 0.03
+max_marginal_drawdown_increase = 0.02

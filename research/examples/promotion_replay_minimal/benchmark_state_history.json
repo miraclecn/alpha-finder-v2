@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "artifact_type": "benchmark_state_history",
+  "benchmark_id": "CSI 800",
+  "classification": "citics_l1",
+  "steps": [
+    {
+      "trade_date": "2026-04-06",
+      "effective_at": "2026-04-06T15:00:00+08:00",
+      "available_at": "2026-04-06T15:30:00+08:00",
+      "industry_weights": {
+        "bank": 0.35,
+        "industrial": 0.3,
+        "tech": 0.35
+      },
+      "constituents": [
+        { "asset_id": "BANK_A", "weight": 0.2, "industry": "bank" },
+        { "asset_id": "BANK_B", "weight": 0.15, "industry": "bank" },
+        { "asset_id": "IND_A", "weight": 0.18, "industry": "industrial" },
+        { "asset_id": "IND_B", "weight": 0.12, "industry": "industrial" },
+        { "asset_id": "TECH_A", "weight": 0.2, "industry": "tech" },
+        { "asset_id": "TECH_B", "weight": 0.15, "industry": "tech" }
+      ]
+    },
+    {
+      "trade_date": "2026-04-13",
+      "effective_at": "2026-04-13T15:00:00+08:00",
+      "available_at": "2026-04-13T15:30:00+08:00",
+      "industry_weights": {
+        "bank": 0.35,
+        "industrial": 0.3,
+        "tech": 0.35
+      },
+      "constituents": [
+        { "asset_id": "BANK_A", "weight": 0.2, "industry": "bank" },
+        { "asset_id": "BANK_B", "weight": 0.15, "industry": "bank" },
+        { "asset_id": "IND_A", "weight": 0.18, "industry": "industrial" },
+        { "asset_id": "IND_B", "weight": 0.12, "industry": "industrial" },
+        { "asset_id": "TECH_A", "weight": 0.2, "industry": "tech" },
+        { "asset_id": "TECH_B", "weight": 0.15, "industry": "tech" }
+      ]
+    },
+    {
+      "trade_date": "2026-04-20",
+      "effective_at": "2026-04-20T15:00:00+08:00",
+      "available_at": "2026-04-20T15:30:00+08:00",
+      "industry_weights": {
+        "bank": 0.35,
+        "industrial": 0.3,
+        "tech": 0.35
+      },
+      "constituents": [
+        { "asset_id": "BANK_A", "weight": 0.2, "industry": "bank" },
+        { "asset_id": "BANK_B", "weight": 0.15, "industry": "bank" },
+        { "asset_id": "IND_A", "weight": 0.18, "industry": "industrial" },
+        { "asset_id": "IND_B", "weight": 0.12, "industry": "industrial" },
+        { "asset_id": "TECH_A", "weight": 0.2, "industry": "tech" },
+        { "asset_id": "TECH_B", "weight": 0.15, "industry": "tech" }
+      ]
+    }
+  ]
+}

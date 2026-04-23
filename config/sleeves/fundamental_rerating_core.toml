@@ -1,0 +1,21 @@
+id = "fundamental_rerating_core"
+name = "Quality Value Anchor Core Sleeve"
+mandate_id = "a_share_long_only_eod"
+thesis_id = "fundamental_rerating"
+descriptor_set_id = "fundamental_rerating_core"
+target_id = "open_t1_to_open_t20_residual_net_cost"
+universe = "investable_a_share_core"
+rebalance_frequency = "weekly"
+target_holding_days = 30
+turnover_budget = 0.10
+execution_rule = "next_day_open"
+neutralization = ["industry", "size", "beta"]
+
+[construction]
+selection = "rank_then_cap_weight"
+holding_count = 18
+weight_cap = 0.08
+
+[constraints]
+min_median_daily_turnover_cny_mn = 50
+exclude_price_limit_lock = true
