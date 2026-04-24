@@ -23,6 +23,7 @@ Its finance logic is:
 
 - sleeve capital is set by the portfolio recipe, not by whichever sleeve happens to emit more names
 - overlapping names are summed, because cross-sleeve agreement is a real source of conviction
+- overlapping tradeability is merged conservatively: if any contributing sleeve cannot enter or exit a name, the combined target keeps that restriction
 - single-name concentration is clipped at the portfolio cap
 - industry concentration is clipped relative to benchmark industry weights
 - any residual weight blocked by hard constraints remains cash

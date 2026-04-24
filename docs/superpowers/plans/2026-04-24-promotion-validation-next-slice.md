@@ -4,92 +4,99 @@
 
 ## Current Verified State
 
-- `PYTHONPATH=src python3 -m unittest discover -s tests -v` passes with `64` tests.
-- `PYTHONPATH=src python3 -m alpha_find_v2 run-promotion-replay --case research/examples/promotion_replay_real_output/replay_case.toml` is reproducible on the checked-in real-output case.
-- The candidate weekly book is now economically incremental instead of mostly re-buying the same names:
-  - baseline IR: `0.3315`
-  - candidate IR: `0.4290`
-  - marginal IR delta: `0.0975`
-  - candidate drawdown: `0.4896`
-  - average signal-name Jaccard: `0.6279`
-  - average candidate-only weight: `0.1019`
-  - average candidate-only return contribution: `0.00192`
-- The current example still does **not** pass the placeholder replay gate because:
-  - `max_peak_to_trough_drawdown`
-  - `minimum_marginal_ir_delta`
+- `PYTHONPATH=src python3 -m unittest discover -s tests -v` now passes with `74` tests.
+- `run-promotion-replay` is reproducible on the checked-in real-output case and now emits:
+  - `decision` plus `snapshot` for the narrow placeholder gate
+  - `research_evidence` for the broader validation surface
+  - `research_evidence.walk_forward` with anchored split summaries and stability aggregates
+  - `research_evidence.regime_breakdown` with regime buckets, stability tables, and weak sub-periods
+- Replay-case loading now rejects mixed-target sleeves up front. Used sleeve artifacts must share one `target_id` before they can be compared on the same replay surface.
+- The checked-in real-output replay lane is still honest but still narrow:
+  - baseline: `trend_leadership_core`
+  - candidate: `trend_leadership_core + trend_resilience_core`
+  - shared target: `open_t1_to_open_t20_net_cost`
+- The slower anchor lane is only partially opened:
+  - `build-fundamental-research-input` now exists
+  - `research/examples/fundamental_input_build_minimal/` now defines the real-output build contract
+  - the repo still does **not** contain `output/open_t1_to_open_t20_residual_component_snapshot.json`
+  - therefore `fundamental_rerating_core` still cannot be built into an honest real-output replay artifact
 
 ## Ordered Next Steps
 
-### 1. Add anchored walk-forward validation on top of promotion replay
+### 1. Obtain an audited residual-component snapshot for the slower anchor target
 
 Why first:
 
-- The current replay is honest, but it still lives on one short checked-in window.
-- Before adding more sleeves, the system needs evidence that a candidate survives multiple entry dates rather than a single favorable path.
+- The new fundamental input builder intentionally refuses to invent residualization inputs inside the repo.
+- Without a real residual-component snapshot, the slower anchor cannot cross the build boundary honestly.
 
 Deliverables:
 
-- a walk-forward split definition for replay cases
-- replay output that reports per-split IR, drawdown, breadth, and marginal contribution
-- deterministic tests that lock the split logic and summary aggregation
+- an audited JSON snapshot for `open_t1_to_open_t20_residual_net_cost`
+- records keyed by `trade_date` plus `asset_id`
+- residual components carried explicitly as `benchmark`, `industry`, `size`, and `beta`
+- provenance notes that explain where the residual inputs came from and which benchmark / industry schema they assume
 
 Success check:
 
-- the same candidate can be evaluated across multiple anchored out-of-sample slices from the checked-in replay calendar
-- the report makes instability visible instead of hiding it in one aggregate number
+- `PYTHONPATH=src python3 -m alpha_find_v2 build-fundamental-research-input --case research/examples/fundamental_input_build_minimal/fundamental_rerating_core.toml` succeeds
+- the command writes `output/fundamental_rerating_core_input.json` without falling back to an internal toy estimator
 
-### 2. Add regime and stability breakdown reporting
+### 2. Build a real `fundamental_rerating_core` sleeve artifact from generated input
 
 Why second:
 
-- A-share sleeves often look acceptable in aggregate while being regime-fragile.
-- The admission question is not only "did the sleeve help?" but also "when did it help, and when did it break?"
+- The replay layer can only evaluate sleeves that already exist as artifacts.
+- The current artifact build case for `fundamental_rerating_core` still points at a checked-in synthetic observation file, not the generated real-output input.
 
 Deliverables:
 
-- regime buckets and stability tables on top of replay periods
-- concentration and overlap diagnostics carried through each bucket
-- explicit identification of weak sub-periods instead of only best/worst single dates
+- a sleeve-artifact build case that consumes `output/fundamental_rerating_core_input.json`
+- a generated `fundamental_rerating_core` artifact built from the real-output observation input
+- verification that the artifact preserves the same target label and weekly decision calendar expected by replay
 
 Success check:
 
-- the replay output shows whether the candidate is robust in trend, drawdown, and weak-breadth conditions
+- `build-sleeve-artifact` succeeds from the generated fundamental input
+- the artifact is no longer a checked-in synthetic placeholder for promotion-replay work
 
-### 3. Separate example-gate output from research-evidence output
+### 3. Create an honest same-target comparator lane for replay
 
 Why third:
 
-- The current real-output example is useful, but `passed = false` is easy to misread as "the work failed".
-- The repo needs a cleaner distinction between:
-  - a narrow placeholder admission gate
-  - a broader research evidence report
+- Replay now correctly rejects mixed-target sleeves, so the current trend real-output artifacts cannot be combined with a residualized fundamental sleeve.
+- The system needs one shared return basis before slower-anchor admission can be evaluated.
 
 Deliverables:
 
-- either a dedicated research-evidence command or a second report block from `run-promotion-replay`
-- docs that explain the difference between replay evidence and promotion admission
+- either a residualized trend real-output lane on `open_t1_to_open_t20_residual_net_cost`
+- or another honest comparator sleeve already built on the same residual target
+- updated replay example docs that state which sleeves are comparable and why
 
 Success check:
 
-- users can see whether a sleeve is economically incremental even when the narrow demo gate still rejects it
+- `run-promotion-replay` accepts the baseline and candidate artifacts without a target mismatch
+- the resulting evidence surface compares like-for-like sleeves instead of mixed labels
 
-### 4. Only then push slower anchor sleeves harder
+### 4. Only then evaluate slower-anchor admission and overlap edge cases
 
 Why last:
 
-- Without the validation layer above, adding a slower anchor sleeve risks optimizing to the current window.
-- More aggressive sleeve differentiation may also trigger overlapping-name trade-state conflicts in `portfolio_constructor.py`.
+- The walk-forward, regime, and output-separation layers already exist; the missing piece is an honest slower-anchor replay lane.
+- Constructor trade-state merging is now conservative, but deeper overlap issues should only be chased once the slower sleeve is actually running on the shared surface.
 
 Deliverables:
 
-- audited `fundamental_rerating_core` replay lane on the same validation surface
-- investigation and repair of inconsistent overlapping trade-state handling if the slower sleeve exposes it
+- a real `fundamental_rerating_core` replay result on the existing walk-forward and regime evidence surface
+- targeted constructor fixes only if the slower sleeve exposes a concrete overlap-state failure
+- updated docs that record whether the slower anchor was admitted or rejected and on what evidence
 
 Success check:
 
-- a slower sleeve is admitted or rejected on the same walk-forward and regime evidence surface as the current dual-trend example
+- the slower sleeve is admitted or rejected on the same evidence surface as the checked-in trend example
+- no target relabeling, zero-filled residual terms, or hidden in-code factor-return estimation was required to make the comparison run
 
 ## Working Rule
 
-Do not spend the next slice chasing the current placeholder gate by threshold tweaking alone.
-The correct next move is to improve the evidence surface first, then admit or reject new sleeves on that surface.
+Do not "complete" this slice by mixing residual and non-residual sleeves, relabeling `target_id`s, or adding a hidden in-code factor-return estimator.
+The honest next move is to obtain the residual-component snapshot first, then build a same-target slower-anchor replay lane on top of the evidence surface that already exists.

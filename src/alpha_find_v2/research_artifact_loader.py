@@ -31,6 +31,7 @@ from .models import (
 )
 from .portfolio_promotion_replay import (
     PortfolioPromotionReplayInput,
+    ReplayWalkForwardSplitDefinition,
     SleeveResearchArtifact,
     SleeveResearchStep,
     SleeveSignalRecord,
@@ -66,6 +67,9 @@ class PortfolioPromotionReplayCaseDefinition:
     max_component_correlation: float = 0.0
     correlation_to_existing_portfolio: float = 0.0
     turnover_budget: float = 0.0
+    walk_forward_splits: list[ReplayWalkForwardSplitDefinition] = field(
+        default_factory=list
+    )
 
     @classmethod
     def from_toml(cls, data: JsonMap) -> "PortfolioPromotionReplayCaseDefinition":
@@ -106,6 +110,10 @@ class PortfolioPromotionReplayCaseDefinition:
                 data.get("correlation_to_existing_portfolio", 0.0)
             ),
             turnover_budget=float(data.get("turnover_budget", 0.0)),
+            walk_forward_splits=[
+                _load_walk_forward_split(item)
+                for item in data.get("walk_forward_splits", [])
+            ],
         )
 
 
@@ -342,6 +350,7 @@ def load_portfolio_promotion_replay_case(
         max_component_correlation=definition.max_component_correlation,
         correlation_to_existing_portfolio=definition.correlation_to_existing_portfolio,
         turnover_budget=definition.turnover_budget,
+        walk_forward_splits=definition.walk_forward_splits,
     )
     return LoadedPortfolioPromotionReplayCase(
         definition=definition,
@@ -378,6 +387,14 @@ def _load_sleeve_step(data: JsonMap) -> SleeveResearchStep:
     return SleeveResearchStep(
         trade_date=str(data["trade_date"]),
         records=[_load_signal_record(item) for item in data.get("records", [])],
+    )
+
+
+def _load_walk_forward_split(data: JsonMap) -> ReplayWalkForwardSplitDefinition:
+    return ReplayWalkForwardSplitDefinition(
+        split_id=str(data["split_id"]),
+        start_trade_date=str(data["start_trade_date"]),
+        end_trade_date=str(data.get("end_trade_date", "")),
     )
 
 
@@ -469,6 +486,19 @@ def _validate_case_artifacts(
     if unused_sleeves:
         raise ValueError(
             f"Replay case contains artifacts for unused sleeves: {', '.join(unused_sleeves)}"
+        )
+
+    used_target_ids = sorted(
+        {
+            artifact.target_id
+            for artifact in artifacts
+            if artifact.sleeve_id in used_sleeves
+        }
+    )
+    if len(used_target_ids) > 1:
+        raise ValueError(
+            "Replay case sleeves must share the same target_id; found: "
+            + ", ".join(used_target_ids)
         )
 
 

@@ -46,11 +46,19 @@ from .reference_data_staging import (
     build_tushare_reference_db,
 )
 from .portfolio_constructor import PortfolioConstructor
-from .portfolio_promotion_replay import PortfolioPromotionReplay
+from .portfolio_promotion_replay import (
+    PortfolioPromotionReplay,
+    PortfolioPromotionReplayResult,
+)
 from .research_artifact_loader import (
     load_sleeve_artifact_build_case,
     load_portfolio_promotion_replay_case,
     load_sleeve_artifact,
+)
+from .fundamental_research_input_builder import (
+    build_fundamental_research_observation_input,
+    load_fundamental_research_input_build_case,
+    write_fundamental_research_observation_input,
 )
 from .trend_research_input_builder import (
     build_trend_research_observation_input,
@@ -61,6 +69,23 @@ from .trend_research_input_builder import (
 
 def _dump_json(payload: object) -> None:
     print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+
+
+def _promotion_replay_research_evidence_payload(
+    result: PortfolioPromotionReplayResult,
+) -> dict[str, object]:
+    return {
+        "baseline_summary": asdict(result.baseline_summary),
+        "candidate_summary": asdict(result.candidate_summary),
+        "marginal": asdict(result.marginal),
+        "diagnostics": asdict(result.diagnostics),
+        "walk_forward": asdict(result.walk_forward) if result.walk_forward is not None else None,
+        "regime_breakdown": (
+            asdict(result.regime_breakdown)
+            if result.regime_breakdown is not None
+            else None
+        ),
+    }
 
 
 def _parse_benchmark_reference(value: str) -> BenchmarkReferenceDefinition:
@@ -321,6 +346,16 @@ def _parse_args() -> argparse.Namespace:
         help="Path to the trend-research input build-case TOML file.",
     )
 
+    build_fundamental_research_input = subparsers.add_parser(
+        "build-fundamental-research-input",
+        help="Build weekly fundamental_rerating research observations from the isolated V2 DuckDB.",
+    )
+    build_fundamental_research_input.add_argument(
+        "--case",
+        default="research/examples/fundamental_input_build_minimal/fundamental_rerating_core.toml",
+        help="Path to the fundamental-research input build-case TOML file.",
+    )
+
     build_benchmark_state = subparsers.add_parser(
         "build-benchmark-state",
         help="Build a PIT benchmark_state_history artifact from the isolated V2 DuckDB.",
@@ -573,6 +608,31 @@ def main() -> None:
         )
         return
 
+    if args.command == "build-fundamental-research-input":
+        loaded_case = load_fundamental_research_input_build_case(Path(args.case))
+        result = build_fundamental_research_observation_input(loaded_case)
+        output_path = write_fundamental_research_observation_input(
+            result,
+            loaded_case.output_path,
+        )
+        _dump_json(
+            {
+                "case_id": result.case_id,
+                "description": result.description,
+                "sleeve_id": result.sleeve_id,
+                "descriptor_set_id": result.descriptor_set_id,
+                "source_db_path": result.source_db_path,
+                "warnings": result.warnings,
+                "trade_dates": [step.trade_date for step in result.observation_input.steps],
+                "step_count": len(result.observation_input.steps),
+                "record_count": sum(
+                    len(step.records) for step in result.observation_input.steps
+                ),
+                "output_path": str(output_path),
+            }
+        )
+        return
+
     if args.command == "build-benchmark-state":
         loaded_case = load_benchmark_state_build_case(Path(args.case))
         artifact = build_benchmark_state_artifact(loaded_case)
@@ -605,11 +665,8 @@ def main() -> None:
                 "case_id": loaded_case.definition.case_id,
                 "description": loaded_case.definition.description,
                 "decision": asdict(result.decision) if result.decision is not None else None,
-                "baseline_summary": asdict(result.baseline_summary),
-                "candidate_summary": asdict(result.candidate_summary),
-                "marginal": asdict(result.marginal),
-                "diagnostics": asdict(result.diagnostics),
                 "snapshot": asdict(result.snapshot),
+                "research_evidence": _promotion_replay_research_evidence_payload(result),
             }
         )
         return

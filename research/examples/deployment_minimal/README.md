@@ -10,6 +10,7 @@ Files:
 
 - `executable_signal_case.toml`: binds a research-approved portfolio, sleeve artifacts, benchmark state, and an account-state snapshot into a next-open execution package
 - `executable_signal_real_output_case.toml`: binds the generated `output/csi800_benchmark_state_history.json` and `output/trend_leadership_core_artifact.json` into a real-output next-open execution package
+- `candidate_portfolio.toml`: deployment-only portfolio recipe used by the persisted executable-signal and decay-watch samples
 - `account_state_2026_04_20.json`: broker/account-facing live snapshot used to derive holdings, cash, and blocked exits
 - `account_state_20260319_trend_real.json`: synthetic broker snapshot aligned to the real 20260319 decision date; holdings mirror the prior weekly trend sleeve so the case emits honest buys, sells, a blocked exit, and a blocked entry
 - `portfolio_state_2026_04_20.json`: records the live book as of the decision date, including holdings, cash, and blocked exits

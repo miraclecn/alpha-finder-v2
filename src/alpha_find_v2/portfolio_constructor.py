@@ -238,11 +238,6 @@ class PortfolioConstructor:
         if abs(existing.realized_return - incoming.realized_return) > 1e-12:
             raise ValueError(f"Inconsistent realized return for asset: {incoming.asset_id}")
         if (
-            existing.trade_state.can_enter != incoming.trade_state.can_enter
-            or existing.trade_state.can_exit != incoming.trade_state.can_exit
-        ):
-            raise ValueError(f"Inconsistent trade state for asset: {incoming.asset_id}")
-        if (
             existing.cost_model_id
             and incoming.cost_model_id
             and existing.cost_model_id != incoming.cost_model_id
@@ -258,8 +253,12 @@ class PortfolioConstructor:
             cost_model_id=existing.cost_model_id or incoming.cost_model_id,
             industry=existing.industry or incoming.industry,
             trade_state=TradeConstraintState(
-                can_enter=existing.trade_state.can_enter,
-                can_exit=existing.trade_state.can_exit,
+                can_enter=(
+                    existing.trade_state.can_enter and incoming.trade_state.can_enter
+                ),
+                can_exit=(
+                    existing.trade_state.can_exit and incoming.trade_state.can_exit
+                ),
             ),
         )
 

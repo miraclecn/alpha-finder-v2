@@ -1,8 +1,10 @@
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 
+from alpha_find_v2.config_loader import CONFIG_ROOT
 from alpha_find_v2.deployment_loader import load_portfolio_state_snapshot
 from alpha_find_v2.live_state import (
     account_state_to_portfolio_state,
@@ -98,15 +100,164 @@ class ResearchArtifactLoaderTest(unittest.TestCase):
         )
         self.assertEqual(
             loaded_case.replay_input.candidate_portfolio.sleeves,
-            ["fundamental_rerating_core", "trend_leadership_core"],
+            ["fundamental_rerating_core", "fundamental_rerating_satellite"],
         )
         self.assertEqual(
             loaded_case.replay_input.artifacts[1].sleeve_id,
-            "trend_leadership_core",
+            "fundamental_rerating_satellite",
         )
         self.assertIsNotNone(loaded_case.benchmark_state_artifact)
         self.assertTrue(result.decision.passed)
         self.assertGreater(result.marginal.marginal_ir_delta, 0.0)
+        self.assertIsNotNone(result.regime_breakdown)
+
+    def test_cli_run_promotion_replay_separates_research_evidence_from_gate_output(self) -> None:
+        result = subprocess.run(
+            [
+                "python3",
+                "-m",
+                "alpha_find_v2",
+                "run-promotion-replay",
+                "--case",
+                str(EXAMPLE_ROOT / "replay_case.toml"),
+            ],
+            cwd=PROJECT_ROOT,
+            env={"PYTHONPATH": "src"},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertIn("decision", payload)
+        self.assertIn("snapshot", payload)
+        self.assertIn("research_evidence", payload)
+        self.assertEqual(
+            sorted(payload["research_evidence"].keys()),
+            [
+                "baseline_summary",
+                "candidate_summary",
+                "diagnostics",
+                "marginal",
+                "regime_breakdown",
+                "walk_forward",
+            ],
+        )
+        self.assertNotIn("baseline_summary", payload)
+        self.assertNotIn("candidate_summary", payload)
+        self.assertNotIn("marginal", payload)
+        self.assertNotIn("diagnostics", payload)
+        self.assertNotIn("walk_forward", payload)
+        self.assertNotIn("regime_breakdown", payload)
+        self.assertEqual(
+            sorted(payload["research_evidence"]["regime_breakdown"].keys()),
+            [
+                "buckets",
+                "stability",
+                "weak_breadth_threshold_name_count",
+                "weak_subperiods",
+            ],
+        )
+
+    def test_load_portfolio_promotion_replay_case_reads_walk_forward_splits(self) -> None:
+        case_text = (
+            (EXAMPLE_ROOT / "replay_case.toml").read_text(encoding="utf-8")
+            + "\n[[walk_forward_splits]]\n"
+            + 'split_id = "full_window"\n'
+            + 'start_trade_date = "2026-04-06"\n'
+            + "\n[[walk_forward_splits]]\n"
+            + 'split_id = "late_entry"\n'
+            + 'start_trade_date = "2026-04-13"\n'
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            case_path = Path(temp_dir) / "replay_case.toml"
+            case_path.write_text(case_text, encoding="utf-8")
+
+            loaded_case = load_portfolio_promotion_replay_case(case_path)
+
+        self.assertEqual(
+            [split.split_id for split in loaded_case.definition.walk_forward_splits],
+            ["full_window", "late_entry"],
+        )
+        self.assertEqual(
+            [split.start_trade_date for split in loaded_case.replay_input.walk_forward_splits],
+            ["2026-04-06", "2026-04-13"],
+        )
+
+    def test_load_portfolio_promotion_replay_case_rejects_mixed_target_ids(self) -> None:
+        baseline_portfolio = """id = "mixed_target_baseline"
+name = "Mixed Target Baseline"
+mandate_id = "a_share_long_only_eod"
+benchmark = "CSI 800"
+rebalance_policy = "weekly"
+description = "Baseline portfolio for mixed-target validation."
+construction_model_id = "a_share_core_blend"
+promotion_gate_id = "research_example_replay_gate"
+execution_policy_id = "a_share_next_open_v1"
+decay_monitor_id = "a_share_core_watch"
+sleeves = ["fundamental_rerating_core"]
+
+[allocation]
+fundamental_rerating_core = 1.0
+
+[constraints]
+max_names = 4
+max_single_name_weight = 0.60
+max_industry_overweight = 0.30
+"""
+        candidate_portfolio = """id = "mixed_target_candidate"
+name = "Mixed Target Candidate"
+mandate_id = "a_share_long_only_eod"
+benchmark = "CSI 800"
+rebalance_policy = "weekly"
+description = "Candidate portfolio for mixed-target validation."
+construction_model_id = "a_share_core_blend"
+promotion_gate_id = "research_example_replay_gate"
+execution_policy_id = "a_share_next_open_v1"
+decay_monitor_id = "a_share_core_watch"
+sleeves = ["fundamental_rerating_core", "trend_leadership_core"]
+
+[allocation]
+fundamental_rerating_core = 0.30
+trend_leadership_core = 0.70
+
+[constraints]
+max_names = 5
+max_single_name_weight = 0.60
+max_industry_overweight = 0.30
+"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            baseline_path = temp_root / "baseline.toml"
+            baseline_path.write_text(baseline_portfolio, encoding="utf-8")
+            candidate_path = temp_root / "candidate.toml"
+            candidate_path.write_text(candidate_portfolio, encoding="utf-8")
+            case_path = temp_root / "replay_case.toml"
+            case_path.write_text(
+                "\n".join(
+                    [
+                        'schema_version = 1',
+                        'artifact_type = "portfolio_promotion_replay_case"',
+                        'case_id = "mixed_target_validation"',
+                        'description = "Reject replay cases that mix incompatible target labels."',
+                        f'baseline_portfolio_path = "{baseline_path}"',
+                        f'candidate_portfolio_path = "{candidate_path}"',
+                        f'default_cost_model_path = "{CONFIG_ROOT / "cost_models" / "base_a_share_cash.toml"}"',
+                        f'benchmark_state_path = "{EXAMPLE_ROOT / "benchmark_state_history.json"}"',
+                        'artifact_paths = [',
+                        f'  "{EXAMPLE_ROOT / "sleeve_artifacts" / "fundamental_rerating_core.json"}",',
+                        f'  "{EXAMPLE_ROOT / "sleeve_artifacts" / "trend_leadership_core.json"}",',
+                        ']',
+                        'periods_per_year = 52',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "must share the same target_id"):
+                load_portfolio_promotion_replay_case(case_path)
 
     def test_load_sleeve_artifact_rejects_unknown_schema_version(self) -> None:
         payload = {

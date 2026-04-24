@@ -174,6 +174,10 @@ The replay case is a TOML file because it mostly binds existing versioned object
 
 The case file does not duplicate mandate or construction metadata that is already stored in the portfolio recipes.
 Those are derived from the candidate portfolio and validated against the baseline portfolio so the replay stays tied to the same live-book frame.
+The replay case also requires every used sleeve artifact to share the same
+`target_id`. Promotion replay can compare baseline and candidate portfolios on
+one common return basis, but it should reject cases that silently mix
+incompatible target labels.
 
 That gives V2 a stricter and cleaner handoff:
 

@@ -3,16 +3,16 @@ name = "Research Example Candidate Portfolio"
 mandate_id = "a_share_long_only_eod"
 benchmark = "CSI 800"
 rebalance_policy = "weekly"
-description = "Candidate example portfolio after admitting the trend-leadership sleeve."
+description = "Candidate example portfolio after admitting a same-target synthetic satellite sleeve."
 construction_model_id = "a_share_core_blend"
 promotion_gate_id = "research_example_replay_gate"
 execution_policy_id = "a_share_next_open_v1"
 decay_monitor_id = "a_share_core_watch"
-sleeves = ["fundamental_rerating_core", "trend_leadership_core"]
+sleeves = ["fundamental_rerating_core", "fundamental_rerating_satellite"]
 
 [allocation]
 fundamental_rerating_core = 0.30
-trend_leadership_core = 0.70
+fundamental_rerating_satellite = 0.70
 
 [constraints]
 max_names = 5

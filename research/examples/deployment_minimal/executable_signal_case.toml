@@ -2,8 +2,8 @@ schema_version = 1
 artifact_type = "executable_signal_case"
 
 case_id = "candidate_portfolio_next_open_2026_04_20"
-description = "Build the next-open executable signal package for the candidate multi-sleeve portfolio on the 2026-04-20 decision date."
-portfolio_path = "research/examples/promotion_replay_minimal/candidate_portfolio.toml"
+description = "Build the next-open executable signal package for the deployment candidate portfolio on the 2026-04-20 decision date."
+portfolio_path = "research/examples/deployment_minimal/candidate_portfolio.toml"
 default_cost_model_path = "config/cost_models/base_a_share_cash.toml"
 additional_cost_model_paths = [
   "config/cost_models/high_a_share_cash.toml",

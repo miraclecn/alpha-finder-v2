@@ -2,8 +2,11 @@
 
 This directory is the first persisted end-to-end V2 replay case.
 
-The sleeve artifacts under `sleeve_artifacts/` are generated outputs.
-Their source build cases now live under `research/examples/artifact_build_minimal/`.
+The sleeve artifacts under `sleeve_artifacts/` are intentionally synthetic.
+They keep the replay loader and replay report stable without depending on the
+current `output/` tree, and the checked-in replay case now keeps both sleeves
+on the same `target_id` so the evidence surface is not polluted by mixed
+return labels.
 
 Files:
 
@@ -29,8 +32,6 @@ Run:
 
 ```bash
 cd /home/nan/alpha-find-v2
-PYTHONPATH=src python -m alpha_find_v2 build-sleeve-artifact --case research/examples/artifact_build_minimal/fundamental_rerating_core.toml
-PYTHONPATH=src python -m alpha_find_v2 build-sleeve-artifact --case research/examples/artifact_build_minimal/trend_leadership_core.toml
 PYTHONPATH=src python -m alpha_find_v2 run-promotion-replay --case research/examples/promotion_replay_minimal/replay_case.toml
 ```
 

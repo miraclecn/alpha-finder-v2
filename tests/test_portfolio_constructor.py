@@ -6,7 +6,7 @@ from alpha_find_v2.portfolio_constructor import (
     PortfolioConstructor,
     SleeveConstructionInput,
 )
-from alpha_find_v2.portfolio_simulator import PortfolioSecuritySignal
+from alpha_find_v2.portfolio_simulator import PortfolioSecuritySignal, TradeConstraintState
 
 
 class PortfolioConstructorTest(unittest.TestCase):
@@ -185,6 +185,108 @@ class PortfolioConstructorTest(unittest.TestCase):
                     )
                 ]
             )
+
+    def test_constructor_merges_overlapping_trade_state_conservatively(self) -> None:
+        mandate = Mandate(
+            id="test_mandate",
+            name="Test Mandate",
+            market="CN-A",
+            benchmark="CSI 800",
+            account_type="cash_equity",
+            description="Test mandate for constructor behavior.",
+            max_single_name_weight=0.35,
+            risk={"max_industry_overweight": 0.10},
+        )
+        portfolio = PortfolioRecipe(
+            id="test_portfolio",
+            name="Test Portfolio",
+            mandate_id="test_mandate",
+            benchmark="CSI 800",
+            rebalance_policy="weekly",
+            description="Test multi-sleeve blend.",
+            construction_model_id="test_blend",
+            sleeves=["slow", "event"],
+            allocation={"slow": 0.60, "event": 0.40},
+            constraints={"max_names": 4, "max_single_name_weight": 0.35},
+        )
+        construction_model = PortfolioConstructionModel(
+            id="test_blend",
+            name="Test Blend",
+            description="Budgeted sum combiner with hard caps and hold-cash overflow.",
+            sleeve_weight_source="portfolio_allocation",
+            overlap_mode="sum",
+            name_selection="top_weight",
+            excess_weight_policy="hold_cash",
+            industry_budget_mode="benchmark_relative",
+        )
+        constructor = PortfolioConstructor(
+            mandate=mandate,
+            portfolio=portfolio,
+            construction_model=construction_model,
+        )
+
+        result = constructor.build(
+            [
+                PortfolioConstructionInput(
+                    trade_date="2026-04-06",
+                    benchmark_industry_weights={
+                        "bank": 0.25,
+                        "tech": 0.20,
+                    },
+                    sleeves=[
+                        SleeveConstructionInput(
+                            sleeve_id="slow",
+                            signals=[
+                                PortfolioSecuritySignal(
+                                    asset_id="AAA",
+                                    target_weight=0.50,
+                                    realized_return=0.0100,
+                                    industry="bank",
+                                    trade_state=TradeConstraintState(
+                                        can_enter=False,
+                                        can_exit=True,
+                                    ),
+                                ),
+                                PortfolioSecuritySignal(
+                                    asset_id="BBB",
+                                    target_weight=0.50,
+                                    realized_return=0.0200,
+                                    industry="tech",
+                                ),
+                            ],
+                        ),
+                        SleeveConstructionInput(
+                            sleeve_id="event",
+                            signals=[
+                                PortfolioSecuritySignal(
+                                    asset_id="AAA",
+                                    target_weight=0.50,
+                                    realized_return=0.0100,
+                                    industry="bank",
+                                    trade_state=TradeConstraintState(
+                                        can_enter=True,
+                                        can_exit=False,
+                                    ),
+                                ),
+                                PortfolioSecuritySignal(
+                                    asset_id="CCC",
+                                    target_weight=0.50,
+                                    realized_return=0.0300,
+                                    industry="tech",
+                                ),
+                            ],
+                        ),
+                    ],
+                )
+            ]
+        )
+
+        step = result.steps[0]
+        merged_signal = next(signal for signal in step.signals if signal.asset_id == "AAA")
+
+        self.assertEqual(step.overlap_names, ["AAA"])
+        self.assertFalse(merged_signal.trade_state.can_enter)
+        self.assertFalse(merged_signal.trade_state.can_exit)
 
 
 if __name__ == "__main__":

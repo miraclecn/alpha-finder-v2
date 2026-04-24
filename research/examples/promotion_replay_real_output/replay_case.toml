@@ -18,6 +18,22 @@ max_component_correlation = 0.60
 correlation_to_existing_portfolio = 0.55
 turnover_budget = 0.55
 
+[[walk_forward_splits]]
+split_id = "anchor_20250829"
+start_trade_date = "20250829"
+
+[[walk_forward_splits]]
+split_id = "anchor_20251020"
+start_trade_date = "20251020"
+
+[[walk_forward_splits]]
+split_id = "anchor_20251201"
+start_trade_date = "20251201"
+
+[[walk_forward_splits]]
+split_id = "anchor_20260114"
+start_trade_date = "20260114"
+
 [cost_scenario_pass]
 base = true
 

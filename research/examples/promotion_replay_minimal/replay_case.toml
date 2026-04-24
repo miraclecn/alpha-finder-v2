@@ -11,7 +11,7 @@ additional_cost_model_paths = [
 benchmark_state_path = "research/examples/promotion_replay_minimal/benchmark_state_history.json"
 artifact_paths = [
   "research/examples/promotion_replay_minimal/sleeve_artifacts/fundamental_rerating_core.json",
-  "research/examples/promotion_replay_minimal/sleeve_artifacts/trend_leadership_core.json",
+  "research/examples/promotion_replay_minimal/sleeve_artifacts/fundamental_rerating_satellite.json",
 ]
 periods_per_year = 52
 max_component_correlation = 0.35

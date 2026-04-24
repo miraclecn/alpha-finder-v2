@@ -3,7 +3,7 @@ artifact_type = "decay_watch_case"
 
 case_id = "candidate_portfolio_shadow_watch_20d"
 description = "Evaluate whether the candidate portfolio's recent shadow-live window still sits inside the promotion envelope."
-portfolio_path = "research/examples/promotion_replay_minimal/candidate_portfolio.toml"
+portfolio_path = "research/examples/deployment_minimal/candidate_portfolio.toml"
 evaluation_date = "2026-05-18"
 window_label = "20d_shadow"
 

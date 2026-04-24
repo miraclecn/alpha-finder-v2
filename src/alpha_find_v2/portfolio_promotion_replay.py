@@ -100,6 +100,16 @@ class PortfolioPromotionReplayInput:
     max_component_correlation: float = 0.0
     correlation_to_existing_portfolio: float = 0.0
     turnover_budget: float = 0.0
+    walk_forward_splits: list["ReplayWalkForwardSplitDefinition"] = field(
+        default_factory=list
+    )
+
+
+@dataclass(slots=True)
+class ReplayWalkForwardSplitDefinition:
+    split_id: str
+    start_trade_date: str
+    end_trade_date: str = ""
 
 
 @dataclass(slots=True)
@@ -145,6 +155,90 @@ class ReplayDiagnostics:
 
 
 @dataclass(slots=True)
+class ReplayWalkForwardSplitSummary:
+    split_id: str
+    start_trade_date: str
+    end_trade_date: str
+    baseline_summary: SimulationSummary
+    candidate_summary: SimulationSummary
+    marginal: MarginalContributionSummary
+
+
+@dataclass(slots=True)
+class ReplayWalkForwardStability:
+    split_count: int = 0
+    average_candidate_ir: float = 0.0
+    worst_candidate_ir: float = 0.0
+    best_candidate_ir: float = 0.0
+    average_marginal_ir_delta: float = 0.0
+    worst_marginal_ir_delta: float = 0.0
+    best_marginal_ir_delta: float = 0.0
+    worst_candidate_drawdown: float = 0.0
+    average_candidate_drawdown: float = 0.0
+    average_candidate_breadth: float = 0.0
+    weakest_candidate_breadth: int = 0
+    positive_marginal_ir_delta_share: float = 0.0
+
+
+@dataclass(slots=True)
+class ReplayWalkForwardEvidence:
+    splits: list[ReplayWalkForwardSplitSummary] = field(default_factory=list)
+    stability: ReplayWalkForwardStability = field(
+        default_factory=ReplayWalkForwardStability
+    )
+
+
+@dataclass(slots=True)
+class ReplayRegimeBucketSummary:
+    bucket_id: str
+    period_count: int = 0
+    trade_dates: list[str] = field(default_factory=list)
+    start_trade_date: str = ""
+    end_trade_date: str = ""
+    baseline_summary: SimulationSummary | None = None
+    candidate_summary: SimulationSummary | None = None
+    marginal: MarginalContributionSummary | None = None
+    diagnostics: ReplayDiagnostics | None = None
+
+
+@dataclass(slots=True)
+class ReplayRegimeStability:
+    bucket_count: int = 0
+    average_candidate_ir: float = 0.0
+    worst_candidate_ir: float = 0.0
+    best_candidate_ir: float = 0.0
+    average_marginal_ir_delta: float = 0.0
+    worst_marginal_ir_delta: float = 0.0
+    best_marginal_ir_delta: float = 0.0
+    worst_candidate_drawdown: float = 0.0
+    average_candidate_drawdown: float = 0.0
+    average_candidate_breadth: float = 0.0
+    weakest_candidate_breadth: int = 0
+    positive_marginal_ir_delta_share: float = 0.0
+
+
+@dataclass(slots=True)
+class ReplayWeakSubperiod:
+    weakness_id: str
+    period_count: int = 0
+    trade_dates: list[str] = field(default_factory=list)
+    start_trade_date: str = ""
+    end_trade_date: str = ""
+    baseline_summary: SimulationSummary | None = None
+    candidate_summary: SimulationSummary | None = None
+    marginal: MarginalContributionSummary | None = None
+    diagnostics: ReplayDiagnostics | None = None
+
+
+@dataclass(slots=True)
+class ReplayRegimeEvidence:
+    weak_breadth_threshold_name_count: float = 0.0
+    buckets: list[ReplayRegimeBucketSummary] = field(default_factory=list)
+    stability: ReplayRegimeStability = field(default_factory=ReplayRegimeStability)
+    weak_subperiods: list[ReplayWeakSubperiod] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class PortfolioPromotionReplayResult:
     baseline_construction: PortfolioConstructionResult
     candidate_construction: PortfolioConstructionResult
@@ -156,6 +250,31 @@ class PortfolioPromotionReplayResult:
     diagnostics: ReplayDiagnostics
     snapshot: SleevePromotionSnapshot
     decision: PromotionDecision | None = None
+    walk_forward: ReplayWalkForwardEvidence | None = None
+    regime_breakdown: ReplayRegimeEvidence | None = None
+
+
+@dataclass(slots=True)
+class ReplayPeriodObservation:
+    trade_date: str
+    signal_name_jaccard: float
+    signal_weight_overlap: float
+    baseline_net_return: float
+    candidate_net_return: float
+    net_return_delta: float
+    turnover_delta: float
+    portfolio_overlap_name_count: float
+    candidate_only_name_count: float
+    candidate_only_weight: float
+    candidate_only_return_contribution: float
+    shared_return_contribution: float
+    baseline_name_count: float
+    candidate_name_count: float
+    baseline_effective_names: float
+    candidate_effective_names: float
+    baseline_cash_weight: float
+    candidate_cash_weight: float
+    candidate_drawdown: float = 0.0
 
 
 class PortfolioPromotionReplay:
@@ -175,6 +294,21 @@ class PortfolioPromotionReplay:
         self.gate_evaluator = PortfolioPromotionGateEvaluator(gate) if gate else None
 
     def replay(self, replay_input: PortfolioPromotionReplayInput) -> PortfolioPromotionReplayResult:
+        result = self._replay_single_path(replay_input)
+        result.regime_breakdown = self._build_regime_breakdown(
+            replay_input=replay_input,
+            result=result,
+        )
+        if replay_input.walk_forward_splits:
+            result.walk_forward = self._build_walk_forward_evidence(
+                replay_input=replay_input,
+            )
+        return result
+
+    def _replay_single_path(
+        self,
+        replay_input: PortfolioPromotionReplayInput,
+    ) -> PortfolioPromotionReplayResult:
         self._validate_portfolio(replay_input.baseline_portfolio)
         self._validate_portfolio(replay_input.candidate_portfolio)
 
@@ -269,6 +403,133 @@ class PortfolioPromotionReplay:
             decision=decision,
         )
 
+    def _build_walk_forward_evidence(
+        self,
+        *,
+        replay_input: PortfolioPromotionReplayInput,
+    ) -> ReplayWalkForwardEvidence:
+        artifacts_by_sleeve = self._artifacts_by_sleeve(replay_input.artifacts)
+        full_trade_dates = self._trade_dates_for_portfolio(
+            replay_input.candidate_portfolio,
+            artifacts_by_sleeve,
+        )
+        splits: list[ReplayWalkForwardSplitSummary] = []
+
+        for split in replay_input.walk_forward_splits:
+            split_trade_dates = self._split_trade_dates(
+                split=split,
+                trade_dates=full_trade_dates,
+            )
+            split_result = self._replay_single_path(
+                self._slice_replay_input(
+                    replay_input=replay_input,
+                    trade_dates=split_trade_dates,
+                )
+            )
+            splits.append(
+                ReplayWalkForwardSplitSummary(
+                    split_id=split.split_id,
+                    start_trade_date=split_trade_dates[0],
+                    end_trade_date=split_trade_dates[-1],
+                    baseline_summary=split_result.baseline_summary,
+                    candidate_summary=split_result.candidate_summary,
+                    marginal=split_result.marginal,
+                )
+            )
+
+        return ReplayWalkForwardEvidence(
+            splits=splits,
+            stability=self._walk_forward_stability(splits),
+        )
+
+    def _build_regime_breakdown(
+        self,
+        *,
+        replay_input: PortfolioPromotionReplayInput,
+        result: PortfolioPromotionReplayResult,
+    ) -> ReplayRegimeEvidence:
+        artifacts_by_sleeve = self._artifacts_by_sleeve(replay_input.artifacts)
+        trade_dates = [step.trade_date for step in result.candidate_simulation.steps]
+        observations = self._build_period_observations(
+            replay_input=replay_input,
+            artifacts_by_sleeve=artifacts_by_sleeve,
+            trade_dates=trade_dates,
+            baseline_construction=result.baseline_construction,
+            candidate_construction=result.candidate_construction,
+            baseline_simulation=result.baseline_simulation,
+            candidate_simulation=result.candidate_simulation,
+        )
+        weak_breadth_threshold = self._average(
+            [observation.candidate_name_count for observation in observations]
+        )
+
+        buckets = [
+            self._regime_bucket_summary(
+                replay_input=replay_input,
+                bucket_id="trend_up",
+                trade_dates=[
+                    observation.trade_date
+                    for observation in observations
+                    if observation.candidate_net_return > 0.0
+                ],
+            ),
+            self._regime_bucket_summary(
+                replay_input=replay_input,
+                bucket_id="trend_down",
+                trade_dates=[
+                    observation.trade_date
+                    for observation in observations
+                    if observation.candidate_net_return <= 0.0
+                ],
+            ),
+            self._regime_bucket_summary(
+                replay_input=replay_input,
+                bucket_id="drawdown",
+                trade_dates=[
+                    observation.trade_date
+                    for observation in observations
+                    if observation.candidate_drawdown > 0.0
+                ],
+            ),
+            self._regime_bucket_summary(
+                replay_input=replay_input,
+                bucket_id="weak_breadth",
+                trade_dates=[
+                    observation.trade_date
+                    for observation in observations
+                    if observation.candidate_name_count < weak_breadth_threshold
+                ],
+            ),
+        ]
+
+        weak_subperiods = [
+            *self._weak_subperiod_summaries(
+                replay_input=replay_input,
+                observations=observations,
+                weakness_id="negative_marginal_delta",
+                predicate=lambda observation: observation.net_return_delta <= 0.0,
+            ),
+            *self._weak_subperiod_summaries(
+                replay_input=replay_input,
+                observations=observations,
+                weakness_id="drawdown",
+                predicate=lambda observation: observation.candidate_drawdown > 0.0,
+            ),
+            *self._weak_subperiod_summaries(
+                replay_input=replay_input,
+                observations=observations,
+                weakness_id="weak_breadth",
+                predicate=lambda observation: observation.candidate_name_count < weak_breadth_threshold,
+            ),
+        ]
+
+        return ReplayRegimeEvidence(
+            weak_breadth_threshold_name_count=weak_breadth_threshold,
+            buckets=buckets,
+            stability=self._regime_stability(buckets),
+            weak_subperiods=weak_subperiods,
+        )
+
     def _artifacts_by_sleeve(
         self,
         artifacts: list[SleeveResearchArtifact],
@@ -338,6 +599,113 @@ class PortfolioPromotionReplay:
                 artifact.step_for_date(trade_date)
         return trade_dates
 
+    def _split_trade_dates(
+        self,
+        *,
+        split: ReplayWalkForwardSplitDefinition,
+        trade_dates: list[str],
+    ) -> list[str]:
+        if split.start_trade_date not in trade_dates:
+            raise ValueError(
+                f"Walk-forward split {split.split_id} must start on a replay trade date: "
+                f"{split.start_trade_date}"
+            )
+
+        end_trade_date = split.end_trade_date or trade_dates[-1]
+        if end_trade_date not in trade_dates:
+            raise ValueError(
+                f"Walk-forward split {split.split_id} must end on a replay trade date: "
+                f"{end_trade_date}"
+            )
+        if split.start_trade_date > end_trade_date:
+            raise ValueError(
+                f"Walk-forward split {split.split_id} must start on or before its end date."
+            )
+
+        selected = [
+            trade_date
+            for trade_date in trade_dates
+            if split.start_trade_date <= trade_date <= end_trade_date
+        ]
+        if not selected:
+            raise ValueError(
+                f"Walk-forward split {split.split_id} produced no replay periods."
+            )
+        return selected
+
+    def _slice_replay_input(
+        self,
+        *,
+        replay_input: PortfolioPromotionReplayInput,
+        trade_dates: list[str],
+    ) -> PortfolioPromotionReplayInput:
+        selected_trade_dates = set(trade_dates)
+        return PortfolioPromotionReplayInput(
+            baseline_portfolio=replay_input.baseline_portfolio,
+            candidate_portfolio=replay_input.candidate_portfolio,
+            artifacts=[
+                SleeveResearchArtifact(
+                    sleeve_id=artifact.sleeve_id,
+                    mandate_id=artifact.mandate_id,
+                    target_id=artifact.target_id,
+                    steps=[
+                        step
+                        for step in artifact.steps
+                        if step.trade_date in selected_trade_dates
+                    ],
+                )
+                for artifact in replay_input.artifacts
+            ],
+            periods_per_year=replay_input.periods_per_year,
+            benchmark_industry_weights_by_date={
+                trade_date: weights
+                for trade_date, weights in replay_input.benchmark_industry_weights_by_date.items()
+                if trade_date in selected_trade_dates
+            },
+            cost_scenario_pass=replay_input.cost_scenario_pass,
+            regime_pass=replay_input.regime_pass,
+            max_component_correlation=replay_input.max_component_correlation,
+            correlation_to_existing_portfolio=replay_input.correlation_to_existing_portfolio,
+            turnover_budget=replay_input.turnover_budget,
+        )
+
+    def _walk_forward_stability(
+        self,
+        splits: list[ReplayWalkForwardSplitSummary],
+    ) -> ReplayWalkForwardStability:
+        if not splits:
+            return ReplayWalkForwardStability()
+
+        candidate_irs = [split.candidate_summary.ir for split in splits]
+        marginal_ir_deltas = [split.marginal.marginal_ir_delta for split in splits]
+        candidate_drawdowns = [
+            split.candidate_summary.peak_to_trough_drawdown
+            for split in splits
+        ]
+        candidate_breadths = [split.candidate_summary.breadth for split in splits]
+        positive_marginal_ir_splits = sum(
+            1 for value in marginal_ir_deltas if value > 0.0
+        )
+
+        return ReplayWalkForwardStability(
+            split_count=len(splits),
+            average_candidate_ir=self._average(candidate_irs),
+            worst_candidate_ir=min(candidate_irs),
+            best_candidate_ir=max(candidate_irs),
+            average_marginal_ir_delta=self._average(marginal_ir_deltas),
+            worst_marginal_ir_delta=min(marginal_ir_deltas),
+            best_marginal_ir_delta=max(marginal_ir_deltas),
+            worst_candidate_drawdown=max(candidate_drawdowns),
+            average_candidate_drawdown=self._average(candidate_drawdowns),
+            average_candidate_breadth=self._average(
+                [float(value) for value in candidate_breadths]
+            ),
+            weakest_candidate_breadth=min(candidate_breadths),
+            positive_marginal_ir_delta_share=(
+                positive_marginal_ir_splits / len(splits)
+            ),
+        )
+
     def _construction_inputs(
         self,
         portfolio: PortfolioRecipe,
@@ -378,6 +746,28 @@ class PortfolioPromotionReplay:
         baseline_simulation: PortfolioSimulationResult,
         candidate_simulation: PortfolioSimulationResult,
     ) -> ReplayDiagnostics:
+        observations = self._build_period_observations(
+            replay_input=replay_input,
+            artifacts_by_sleeve=artifacts_by_sleeve,
+            trade_dates=trade_dates,
+            baseline_construction=baseline_construction,
+            candidate_construction=candidate_construction,
+            baseline_simulation=baseline_simulation,
+            candidate_simulation=candidate_simulation,
+        )
+        return self._aggregate_diagnostics(observations)
+
+    def _build_period_observations(
+        self,
+        *,
+        replay_input: PortfolioPromotionReplayInput,
+        artifacts_by_sleeve: dict[str, SleeveResearchArtifact],
+        trade_dates: list[str],
+        baseline_construction: PortfolioConstructionResult,
+        candidate_construction: PortfolioConstructionResult,
+        baseline_simulation: PortfolioSimulationResult,
+        candidate_simulation: PortfolioSimulationResult,
+    ) -> list[ReplayPeriodObservation]:
         existing_sleeves = [
             sleeve_id
             for sleeve_id in replay_input.candidate_portfolio.sleeves
@@ -389,8 +779,15 @@ class PortfolioPromotionReplay:
             if sleeve_id not in replay_input.baseline_portfolio.sleeves
         ]
 
-        signal_name_jaccards: list[float] = []
-        signal_weight_overlaps: list[float] = []
+        candidate_steps_by_date = {
+            step.trade_date: step for step in candidate_construction.steps
+        }
+        baseline_simulation_by_date = {step.trade_date: step for step in baseline_simulation.steps}
+        candidate_simulation_by_date = {step.trade_date: step for step in candidate_simulation.steps}
+        observations: list[ReplayPeriodObservation] = []
+        candidate_equity = 1.0
+        candidate_peak = 1.0
+
         for trade_date in trade_dates:
             existing_weights = self._sleeve_group_weights(
                 sleeve_ids=existing_sleeves,
@@ -404,40 +801,6 @@ class PortfolioPromotionReplay:
                 trade_date=trade_date,
                 artifacts_by_sleeve=artifacts_by_sleeve,
             )
-            signal_name_jaccards.append(
-                self._name_jaccard(existing_weights, candidate_only_weights)
-            )
-            signal_weight_overlaps.append(
-                self._weight_overlap(existing_weights, candidate_only_weights)
-            )
-
-        baseline_steps_by_date = {
-            step.trade_date: step for step in baseline_construction.steps
-        }
-        candidate_steps_by_date = {
-            step.trade_date: step for step in candidate_construction.steps
-        }
-        baseline_simulation_by_date = {
-            step.trade_date: step for step in baseline_simulation.steps
-        }
-        candidate_simulation_by_date = {
-            step.trade_date: step for step in candidate_simulation.steps
-        }
-
-        portfolio_overlap_name_counts: list[float] = []
-        candidate_only_name_counts: list[float] = []
-        candidate_only_weights: list[float] = []
-        candidate_only_return_contributions: list[float] = []
-        shared_return_contributions: list[float] = []
-        baseline_name_counts: list[float] = []
-        candidate_name_counts: list[float] = []
-        baseline_effective_names: list[float] = []
-        candidate_effective_names: list[float] = []
-        baseline_cash_weights: list[float] = []
-        candidate_cash_weights: list[float] = []
-        period_deltas: list[ReplayPeriodDelta] = []
-
-        for trade_date in trade_dates:
             candidate_step = candidate_steps_by_date[trade_date]
             baseline_result_step = baseline_simulation_by_date[trade_date]
             candidate_result_step = candidate_simulation_by_date[trade_date]
@@ -450,45 +813,21 @@ class PortfolioPromotionReplay:
                 signal.asset_id: signal.realized_return for signal in candidate_step.signals
             }
 
-            portfolio_overlap_name_counts.append(float(len(shared_names)))
-            candidate_only_name_counts.append(float(len(candidate_only_names)))
-            candidate_only_weights.append(
-                sum(
-                    candidate_result_step.executed_weights[asset_id]
-                    for asset_id in candidate_only_names
-                )
-            )
-            candidate_only_return_contributions.append(
-                sum(
-                    candidate_result_step.executed_weights[asset_id]
-                    * candidate_returns[asset_id]
-                    for asset_id in candidate_only_names
-                )
-            )
-            shared_return_contributions.append(
-                sum(
-                    candidate_result_step.executed_weights[asset_id]
-                    * candidate_returns[asset_id]
-                    for asset_id in shared_names
-                )
-            )
-            baseline_name_counts.append(float(len(baseline_result_step.executed_weights)))
-            candidate_name_counts.append(float(len(candidate_result_step.executed_weights)))
-            baseline_effective_names.append(
-                self._effective_name_count(baseline_result_step.executed_weights)
-            )
-            candidate_effective_names.append(
-                self._effective_name_count(candidate_result_step.executed_weights)
-            )
-            baseline_cash_weights.append(
-                max(1.0 - sum(baseline_result_step.executed_weights.values()), 0.0)
-            )
-            candidate_cash_weights.append(
-                max(1.0 - sum(candidate_result_step.executed_weights.values()), 0.0)
-            )
-            period_deltas.append(
-                ReplayPeriodDelta(
+            candidate_equity *= 1.0 + candidate_result_step.net_return
+            candidate_peak = max(candidate_peak, candidate_equity)
+            candidate_drawdown = 1.0 - (candidate_equity / candidate_peak)
+
+            observations.append(
+                ReplayPeriodObservation(
                     trade_date=trade_date,
+                    signal_name_jaccard=self._name_jaccard(
+                        existing_weights,
+                        candidate_only_weights,
+                    ),
+                    signal_weight_overlap=self._weight_overlap(
+                        existing_weights,
+                        candidate_only_weights,
+                    ),
                     baseline_net_return=baseline_result_step.net_return,
                     candidate_net_return=candidate_result_step.net_return,
                     net_return_delta=(
@@ -497,32 +836,111 @@ class PortfolioPromotionReplay:
                     turnover_delta=(
                         candidate_result_step.turnover - baseline_result_step.turnover
                     ),
+                    portfolio_overlap_name_count=float(len(shared_names)),
+                    candidate_only_name_count=float(len(candidate_only_names)),
+                    candidate_only_weight=sum(
+                        candidate_result_step.executed_weights[asset_id]
+                        for asset_id in candidate_only_names
+                    ),
+                    candidate_only_return_contribution=sum(
+                        candidate_result_step.executed_weights[asset_id]
+                        * candidate_returns[asset_id]
+                        for asset_id in candidate_only_names
+                    ),
+                    shared_return_contribution=sum(
+                        candidate_result_step.executed_weights[asset_id]
+                        * candidate_returns[asset_id]
+                        for asset_id in shared_names
+                    ),
+                    baseline_name_count=float(len(baseline_result_step.executed_weights)),
+                    candidate_name_count=float(len(candidate_result_step.executed_weights)),
+                    baseline_effective_names=self._effective_name_count(
+                        baseline_result_step.executed_weights
+                    ),
+                    candidate_effective_names=self._effective_name_count(
+                        candidate_result_step.executed_weights
+                    ),
+                    baseline_cash_weight=max(
+                        1.0 - sum(baseline_result_step.executed_weights.values()),
+                        0.0,
+                    ),
+                    candidate_cash_weight=max(
+                        1.0 - sum(candidate_result_step.executed_weights.values()),
+                        0.0,
+                    ),
+                    candidate_drawdown=candidate_drawdown,
                 )
             )
 
+        return observations
+
+    def _aggregate_diagnostics(
+        self,
+        observations: list[ReplayPeriodObservation],
+    ) -> ReplayDiagnostics:
+        period_deltas = [
+            ReplayPeriodDelta(
+                trade_date=observation.trade_date,
+                baseline_net_return=observation.baseline_net_return,
+                candidate_net_return=observation.candidate_net_return,
+                net_return_delta=observation.net_return_delta,
+                turnover_delta=observation.turnover_delta,
+            )
+            for observation in observations
+        ]
+
         return ReplayDiagnostics(
             incrementality=ReplayIncrementalityDiagnostics(
-                average_signal_name_jaccard=self._average(signal_name_jaccards),
-                average_signal_weight_overlap=self._average(signal_weight_overlaps),
-                average_portfolio_overlap_name_count=self._average(
-                    portfolio_overlap_name_counts
+                average_signal_name_jaccard=self._average(
+                    [observation.signal_name_jaccard for observation in observations]
                 ),
-                average_candidate_only_name_count=self._average(candidate_only_name_counts),
-                average_candidate_only_weight=self._average(candidate_only_weights),
+                average_signal_weight_overlap=self._average(
+                    [observation.signal_weight_overlap for observation in observations]
+                ),
+                average_portfolio_overlap_name_count=self._average(
+                    [
+                        observation.portfolio_overlap_name_count
+                        for observation in observations
+                    ]
+                ),
+                average_candidate_only_name_count=self._average(
+                    [observation.candidate_only_name_count for observation in observations]
+                ),
+                average_candidate_only_weight=self._average(
+                    [observation.candidate_only_weight for observation in observations]
+                ),
                 average_candidate_only_return_contribution=self._average(
-                    candidate_only_return_contributions
+                    [
+                        observation.candidate_only_return_contribution
+                        for observation in observations
+                    ]
                 ),
                 average_shared_return_contribution=self._average(
-                    shared_return_contributions
+                    [
+                        observation.shared_return_contribution
+                        for observation in observations
+                    ]
                 ),
             ),
             concentration=ReplayConcentrationDiagnostics(
-                baseline_average_name_count=self._average(baseline_name_counts),
-                candidate_average_name_count=self._average(candidate_name_counts),
-                baseline_average_effective_names=self._average(baseline_effective_names),
-                candidate_average_effective_names=self._average(candidate_effective_names),
-                baseline_average_cash_weight=self._average(baseline_cash_weights),
-                candidate_average_cash_weight=self._average(candidate_cash_weights),
+                baseline_average_name_count=self._average(
+                    [observation.baseline_name_count for observation in observations]
+                ),
+                candidate_average_name_count=self._average(
+                    [observation.candidate_name_count for observation in observations]
+                ),
+                baseline_average_effective_names=self._average(
+                    [observation.baseline_effective_names for observation in observations]
+                ),
+                candidate_average_effective_names=self._average(
+                    [observation.candidate_effective_names for observation in observations]
+                ),
+                baseline_average_cash_weight=self._average(
+                    [observation.baseline_cash_weight for observation in observations]
+                ),
+                candidate_average_cash_weight=self._average(
+                    [observation.candidate_cash_weight for observation in observations]
+                ),
             ),
             best_periods=sorted(
                 period_deltas,
@@ -532,6 +950,151 @@ class PortfolioPromotionReplay:
                 period_deltas,
                 key=lambda period: (period.net_return_delta, period.trade_date),
             )[:3],
+        )
+
+    def _regime_bucket_summary(
+        self,
+        *,
+        replay_input: PortfolioPromotionReplayInput,
+        bucket_id: str,
+        trade_dates: list[str],
+    ) -> ReplayRegimeBucketSummary:
+        if not trade_dates:
+            return ReplayRegimeBucketSummary(bucket_id=bucket_id)
+
+        bucket_result = self._replay_single_path(
+            self._slice_replay_input(
+                replay_input=replay_input,
+                trade_dates=trade_dates,
+            )
+        )
+        return ReplayRegimeBucketSummary(
+            bucket_id=bucket_id,
+            period_count=len(trade_dates),
+            trade_dates=trade_dates,
+            start_trade_date=trade_dates[0],
+            end_trade_date=trade_dates[-1],
+            baseline_summary=bucket_result.baseline_summary,
+            candidate_summary=bucket_result.candidate_summary,
+            marginal=bucket_result.marginal,
+            diagnostics=bucket_result.diagnostics,
+        )
+
+    def _weak_subperiod_summaries(
+        self,
+        *,
+        replay_input: PortfolioPromotionReplayInput,
+        observations: list[ReplayPeriodObservation],
+        weakness_id: str,
+        predicate,
+    ) -> list[ReplayWeakSubperiod]:
+        summaries: list[ReplayWeakSubperiod] = []
+        current_trade_dates: list[str] = []
+
+        for observation in observations:
+            if predicate(observation):
+                current_trade_dates.append(observation.trade_date)
+                continue
+
+            if current_trade_dates:
+                summaries.append(
+                    self._weak_subperiod_summary(
+                        replay_input=replay_input,
+                        weakness_id=weakness_id,
+                        trade_dates=current_trade_dates,
+                    )
+                )
+                current_trade_dates = []
+
+        if current_trade_dates:
+            summaries.append(
+                self._weak_subperiod_summary(
+                    replay_input=replay_input,
+                    weakness_id=weakness_id,
+                    trade_dates=current_trade_dates,
+                )
+            )
+
+        return summaries
+
+    def _weak_subperiod_summary(
+        self,
+        *,
+        replay_input: PortfolioPromotionReplayInput,
+        weakness_id: str,
+        trade_dates: list[str],
+    ) -> ReplayWeakSubperiod:
+        segment_result = self._replay_single_path(
+            self._slice_replay_input(
+                replay_input=replay_input,
+                trade_dates=trade_dates,
+            )
+        )
+        return ReplayWeakSubperiod(
+            weakness_id=weakness_id,
+            period_count=len(trade_dates),
+            trade_dates=trade_dates,
+            start_trade_date=trade_dates[0],
+            end_trade_date=trade_dates[-1],
+            baseline_summary=segment_result.baseline_summary,
+            candidate_summary=segment_result.candidate_summary,
+            marginal=segment_result.marginal,
+            diagnostics=segment_result.diagnostics,
+        )
+
+    def _regime_stability(
+        self,
+        buckets: list[ReplayRegimeBucketSummary],
+    ) -> ReplayRegimeStability:
+        populated_buckets = [
+            bucket
+            for bucket in buckets
+            if bucket.candidate_summary is not None and bucket.marginal is not None
+        ]
+        if not populated_buckets:
+            return ReplayRegimeStability()
+
+        candidate_irs = [
+            bucket.candidate_summary.ir
+            for bucket in populated_buckets
+            if bucket.candidate_summary is not None
+        ]
+        marginal_ir_deltas = [
+            bucket.marginal.marginal_ir_delta
+            for bucket in populated_buckets
+            if bucket.marginal is not None
+        ]
+        candidate_drawdowns = [
+            bucket.candidate_summary.peak_to_trough_drawdown
+            for bucket in populated_buckets
+            if bucket.candidate_summary is not None
+        ]
+        candidate_breadths = [
+            bucket.candidate_summary.breadth
+            for bucket in populated_buckets
+            if bucket.candidate_summary is not None
+        ]
+        positive_marginal_ir_buckets = sum(
+            1 for value in marginal_ir_deltas if value > 0.0
+        )
+
+        return ReplayRegimeStability(
+            bucket_count=len(populated_buckets),
+            average_candidate_ir=self._average(candidate_irs),
+            worst_candidate_ir=min(candidate_irs),
+            best_candidate_ir=max(candidate_irs),
+            average_marginal_ir_delta=self._average(marginal_ir_deltas),
+            worst_marginal_ir_delta=min(marginal_ir_deltas),
+            best_marginal_ir_delta=max(marginal_ir_deltas),
+            worst_candidate_drawdown=max(candidate_drawdowns),
+            average_candidate_drawdown=self._average(candidate_drawdowns),
+            average_candidate_breadth=self._average(
+                [float(value) for value in candidate_breadths]
+            ),
+            weakest_candidate_breadth=min(candidate_breadths),
+            positive_marginal_ir_delta_share=(
+                positive_marginal_ir_buckets / len(populated_buckets)
+            ),
         )
 
     def _sleeve_group_weights(
