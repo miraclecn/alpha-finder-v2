@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict
+from datetime import date
 import json
 from pathlib import Path
 
@@ -35,6 +36,15 @@ from .live_state import (
     load_benchmark_state_artifact,
 )
 from .market_data_bootstrap import build_research_source_db
+from .benchmark_state_builder import (
+    build_benchmark_state_artifact,
+    load_benchmark_state_build_case,
+    write_benchmark_state_artifact,
+)
+from .reference_data_staging import (
+    BenchmarkReferenceDefinition,
+    build_tushare_reference_db,
+)
 from .portfolio_constructor import PortfolioConstructor
 from .portfolio_promotion_replay import PortfolioPromotionReplay
 from .research_artifact_loader import (
@@ -42,10 +52,28 @@ from .research_artifact_loader import (
     load_portfolio_promotion_replay_case,
     load_sleeve_artifact,
 )
+from .trend_research_input_builder import (
+    build_trend_research_observation_input,
+    load_trend_research_input_build_case,
+    write_trend_research_observation_input,
+)
 
 
 def _dump_json(payload: object) -> None:
     print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+
+
+def _parse_benchmark_reference(value: str) -> BenchmarkReferenceDefinition:
+    benchmark_id, separator, index_code = value.partition("=")
+    if not separator or not benchmark_id.strip() or not index_code.strip():
+        raise ValueError(
+            "Benchmark references must use '<benchmark_id>=<index_code>', "
+            f"got: {value}"
+        )
+    return BenchmarkReferenceDefinition(
+        benchmark_id=benchmark_id.strip(),
+        index_code=index_code.strip(),
+    )
 
 
 def _parse_args() -> argparse.Namespace:
@@ -232,6 +260,75 @@ def _parse_args() -> argparse.Namespace:
         "--target-db",
         default="output/research_source.duckdb",
         help="Path to the V2 research-source DuckDB file to create or refresh.",
+    )
+    build_research_source_db_cmd.add_argument(
+        "--supplemental-db",
+        default="",
+        help="Optional DuckDB containing audited PIT reference tables such as industry_classification_pit, benchmark_membership_pit, and benchmark_weight_snapshot_pit.",
+    )
+
+    build_reference_staging_db = subparsers.add_parser(
+        "build-reference-staging-db",
+        help="Build a supplemental DuckDB of PIT benchmark and industry reference tables from Tushare.",
+    )
+    build_reference_staging_db.add_argument(
+        "--target-db",
+        default="output/pit_reference_staging.duckdb",
+        help="Path to the supplemental DuckDB file to create or refresh.",
+    )
+    build_reference_staging_db.add_argument(
+        "--start-date",
+        default="20140101",
+        help="Earliest snapshot date to request from Tushare in YYYYMMDD format.",
+    )
+    build_reference_staging_db.add_argument(
+        "--end-date",
+        default="",
+        help="Latest snapshot date to request from Tushare in YYYYMMDD format. Defaults to today.",
+    )
+    build_reference_staging_db.add_argument(
+        "--benchmark",
+        action="append",
+        default=[],
+        help="Benchmark reference mapping in the form '<benchmark_id>=<index_code>'. Defaults to CSI 800=000906.SH.",
+    )
+    build_reference_staging_db.add_argument(
+        "--industry-level",
+        action="append",
+        choices=["L1", "L2", "L3"],
+        default=[],
+        help="SW2021 industry levels to stage. Defaults to L1,L2,L3.",
+    )
+    build_reference_staging_db.add_argument(
+        "--index-weight-window-months",
+        type=int,
+        default=1,
+        help="Month window size used to chunk index_weight requests and avoid Tushare truncation.",
+    )
+    build_reference_staging_db.add_argument(
+        "--token",
+        default="",
+        help="Optional explicit Tushare token. Falls back to TUSHARE_TOKEN or the legacy collector .env.",
+    )
+
+    build_trend_research_input = subparsers.add_parser(
+        "build-trend-research-input",
+        help="Build weekly trend_leadership research observations from the isolated V2 DuckDB.",
+    )
+    build_trend_research_input.add_argument(
+        "--case",
+        default="research/examples/trend_input_build_minimal/trend_leadership_core.toml",
+        help="Path to the trend-research input build-case TOML file.",
+    )
+
+    build_benchmark_state = subparsers.add_parser(
+        "build-benchmark-state",
+        help="Build a PIT benchmark_state_history artifact from the isolated V2 DuckDB.",
+    )
+    build_benchmark_state.add_argument(
+        "--case",
+        default="research/examples/benchmark_state_build_minimal/csi800.toml",
+        help="Path to the benchmark-state build-case TOML file.",
     )
 
     run_promotion_replay = subparsers.add_parser(
@@ -432,8 +529,66 @@ def main() -> None:
         result = build_research_source_db(
             source_db=Path(args.source_db),
             target_db=Path(args.target_db),
+            supplemental_db=Path(args.supplemental_db) if args.supplemental_db else None,
         )
         _dump_json(result)
+        return
+
+    if args.command == "build-reference-staging-db":
+        benchmark_values = args.benchmark or ["CSI 800=000906.SH"]
+        benchmarks = [_parse_benchmark_reference(value) for value in benchmark_values]
+        industry_levels = tuple(args.industry_level or ["L1", "L2", "L3"])
+        end_date = args.end_date or date.today().strftime("%Y%m%d")
+        result = build_tushare_reference_db(
+            target_db=Path(args.target_db),
+            benchmarks=benchmarks,
+            start_date=args.start_date,
+            end_date=end_date,
+            token=args.token or None,
+            industry_levels=industry_levels,
+            index_weight_window_months=args.index_weight_window_months,
+        )
+        _dump_json(result)
+        return
+
+    if args.command == "build-trend-research-input":
+        loaded_case = load_trend_research_input_build_case(Path(args.case))
+        result = build_trend_research_observation_input(loaded_case)
+        output_path = write_trend_research_observation_input(result, loaded_case.output_path)
+        _dump_json(
+            {
+                "case_id": result.case_id,
+                "description": result.description,
+                "sleeve_id": result.sleeve_id,
+                "descriptor_set_id": result.descriptor_set_id,
+                "source_db_path": result.source_db_path,
+                "warnings": result.warnings,
+                "trade_dates": [step.trade_date for step in result.observation_input.steps],
+                "step_count": len(result.observation_input.steps),
+                "record_count": sum(
+                    len(step.records) for step in result.observation_input.steps
+                ),
+                "output_path": str(output_path),
+            }
+        )
+        return
+
+    if args.command == "build-benchmark-state":
+        loaded_case = load_benchmark_state_build_case(Path(args.case))
+        artifact = build_benchmark_state_artifact(loaded_case)
+        output_path = write_benchmark_state_artifact(artifact, loaded_case.definition.output_path)
+        _dump_json(
+            {
+                "case_id": loaded_case.definition.case_id,
+                "description": loaded_case.definition.description,
+                "benchmark_id": artifact.benchmark_id,
+                "classification": artifact.classification,
+                "weighting_method": artifact.weighting_method,
+                "trade_dates": [step.trade_date for step in artifact.steps],
+                "step_count": len(artifact.steps),
+                "output_path": str(output_path),
+            }
+        )
         return
 
     if args.command == "run-promotion-replay":
@@ -453,6 +608,7 @@ def main() -> None:
                 "baseline_summary": asdict(result.baseline_summary),
                 "candidate_summary": asdict(result.candidate_summary),
                 "marginal": asdict(result.marginal),
+                "diagnostics": asdict(result.diagnostics),
                 "snapshot": asdict(result.snapshot),
             }
         )

@@ -28,6 +28,26 @@ The first production research stack is constrained by what a personal system can
 
 In practice, V2 now treats `Tushare 2000` daily data as the production truth layer and uses slower fundamentals only with conservative reporting-lag rules.
 
+For `trend_leadership_core`, the current research bridge is intentionally
+bound to an interim `open_t1_to_open_t20_net_cost` target. The pipeline now
+states net-of-cost forward returns honestly instead of emitting placeholder
+zero residual components before audited PIT residualization inputs exist.
+V2 now also carries a second weekly price-based real sleeve,
+`trend_resilience_core`, which tilts harder toward stable and liquid leaders
+on the same decision calendar so generated real-output promotion replay is no
+longer blocked on a missing second sleeve artifact.
+When audited `industry_classification_pit` data is present in the research
+DuckDB, the trend input builder can now bind PIT industry labels directly.
+If a portfolio uses `benchmark_relative` industry caps, V2 now rejects sleeve
+signals with blank industry labels instead of silently treating them as valid.
+The research-source bootstrap can now also import audited PIT reference tables
+from a supplemental DuckDB, and V2 can build a formal
+`benchmark_state_history` artifact either from staged benchmark membership plus
+`float_mcap_proxy` or from staged official `benchmark_weight_snapshot_pit`
+provider weights. The trend input builder now requires an explicit
+`industry_schema` when binding PIT industry labels so multi-schema reference
+tables remain honest.
+
 ## Repo Layout
 
 - `config/mandates`: live trading mandates
@@ -48,7 +68,11 @@ In practice, V2 now treats `Tushare 2000` daily data as the production truth lay
 - `docs/migration`: V1 to V2 boundary documents
 - `research/examples`: persisted replay and deployment cases plus sample sleeve, benchmark-state, and account-state artifacts
 - `research/examples/artifact_build_minimal`: build cases that emit standardized sleeve artifacts from normalized research observations
+- `research/examples/trend_input_build_minimal`: DuckDB-backed build cases that emit first-pass trend observation inputs
 - `research/examples/deployment_minimal`: deployment cases plus account-state and portfolio-state snapshots that bind the live book to the executable package
+- `research/examples/benchmark_state_build_minimal`: build cases for turning PIT benchmark membership and industry classification into benchmark-state artifacts
+- `research/examples/promotion_replay_real_output`: honest replay case that compares two generated weekly sleeves on the shared `output/` decision calendar
+- `src/alpha_find_v2/reference_data_staging.py`: Tushare-backed staging of PIT benchmark and industry reference tables into supplemental DuckDBs
 - `src/alpha_find_v2`: loaders plus portfolio construction, simulation, deployment, artifact I/O, and promotion replay primitives
 - `docs/data/v1-duckdb-reuse-audit.md`: explicit V1 DuckDB reuse findings and V2 source-DB decisions
 - `tests`: config and loader verification
@@ -73,7 +97,15 @@ PYTHONPATH=src python -m alpha_find_v2 show-portfolio-construction-model --path 
 PYTHONPATH=src python -m alpha_find_v2 show-risk-model --path config/risk_models/a_share_core_equity.toml
 PYTHONPATH=src python -m alpha_find_v2 show-target --path config/targets/open_t1_to_open_t20_residual_net_cost.toml
 PYTHONPATH=src python -m alpha_find_v2 show-decay-monitor --path config/decay_monitors/a_share_core_watch.toml
-PYTHONPATH=src python -m alpha_find_v2 build-research-source-db --source-db /home/nan/alpha-find/output/stock_data_audited.duckdb --target-db output/research_source.duckdb
+PYTHONPATH=src python -m alpha_find_v2 build-reference-staging-db --target-db output/pit_reference_staging.duckdb --start-date 20140101 --benchmark "CSI 800=000906.SH"
+PYTHONPATH=src python -m alpha_find_v2 build-research-source-db --source-db /home/nan/alpha-find/output/stock_data_audited.duckdb --supplemental-db output/pit_reference_staging.duckdb --target-db output/research_source.duckdb
+PYTHONPATH=src python -m alpha_find_v2 build-benchmark-state --case research/examples/benchmark_state_build_minimal/csi800.toml
+PYTHONPATH=src python -m alpha_find_v2 build-trend-research-input --case research/examples/trend_input_build_minimal/trend_leadership_core.toml
+PYTHONPATH=src python -m alpha_find_v2 build-trend-research-input --case research/examples/trend_input_build_minimal/trend_resilience_core.toml
+PYTHONPATH=src python -m alpha_find_v2 build-sleeve-artifact --case research/examples/artifact_build_minimal/trend_leadership_core_output.toml
+PYTHONPATH=src python -m alpha_find_v2 build-sleeve-artifact --case research/examples/artifact_build_minimal/trend_resilience_core_output.toml
+PYTHONPATH=src python -m alpha_find_v2 run-promotion-replay --case research/examples/promotion_replay_real_output/replay_case.toml
+PYTHONPATH=src python -m alpha_find_v2 build-executable-signal --case research/examples/deployment_minimal/executable_signal_real_output_case.toml
 PYTHONPATH=src python -m alpha_find_v2 build-sleeve-artifact --case research/examples/artifact_build_minimal/fundamental_rerating_core.toml
 PYTHONPATH=src python -m alpha_find_v2 build-sleeve-artifact --case research/examples/artifact_build_minimal/trend_leadership_core.toml
 PYTHONPATH=src python -m alpha_find_v2 show-sleeve-artifact --path research/examples/promotion_replay_minimal/sleeve_artifacts/trend_leadership_core.json
@@ -83,6 +115,30 @@ PYTHONPATH=src python -m alpha_find_v2 evaluate-decay-watch --case research/exam
 ```
 
 If `pytest` is installed in your environment, `pytest -q` is also valid.
+
+Note:
+
+- `/home/nan/alpha-find/output/stock_data_audited.duckdb` still does not carry
+  `benchmark_membership_pit`, `benchmark_weight_snapshot_pit`, or
+  `industry_classification_pit`.
+- Those PIT reference tables must be staged into the supplemental DuckDB passed
+  to `build-research-source-db`.
+- `build-reference-staging-db` now stages official `index_weight` snapshots and
+  SW2021 `index_member_all` history so the checked-in CSI 800 benchmark case can
+  run with `provider_weight` and `sw2021_l1`.
+- `research/examples/trend_input_build_minimal/trend_leadership_core.toml` now
+  enables `cn_a_directional_open_lock`, so generated trend artifacts stop
+  silently suppressing A-share open-limit trade blocks.
+- The current honest CSI 800 + `sw2021_l1` replay window begins on `2025-08-29`
+  because earlier benchmark constituents still have missing staged SW2021
+  classification coverage.
+- The real-output promotion replay lane now compares generated
+  `trend_leadership_core` and `trend_resilience_core` artifacts on that same
+  `2025-08-29+` weekly calendar instead of falling back to a synthetic second
+  sleeve artifact.
+- `run-promotion-replay` now emits replay diagnostics for sleeve overlap,
+  candidate-only contribution, concentration, and the best/worst incremental
+  periods so portfolio tuning can be guided by economic evidence.
 
 ## Operating Principle
 

@@ -121,7 +121,7 @@ def _build_record(
 
     gross_return = (record.exit_open / record.entry_open) - 1.0
     risk_decomposition = None
-    if record.exposures:
+    if record.exposures and builder.target.residualization:
         if residualizer is None:
             raise ValueError("Artifact build record exposures require a configured risk model.")
         risk_decomposition = residualizer.decompose(
@@ -132,7 +132,7 @@ def _build_record(
             ),
             snapshot=RiskModelSnapshot(factor_returns=factor_returns),
         )
-    elif not record.residual_components:
+    elif builder.target.residualization and not record.residual_components:
         raise ValueError(
             "Artifact build record must define either exposures or residual_components."
         )
@@ -146,15 +146,15 @@ def _build_record(
         risk_decomposition=risk_decomposition,
     )
     evaluation = builder.evaluate(observation)
-    if evaluation.residual_return is None:
-        raise ValueError(f"Missing realized residual return for asset {record.asset_id}")
+    if evaluation.realized_return is None:
+        raise ValueError(f"Missing realized return for asset {record.asset_id}")
 
     return SleeveSignalRecord(
         asset_id=record.asset_id,
         rank=record.rank,
         score=record.score,
         target_weight=record.target_weight,
-        realized_return=evaluation.residual_return,
+        realized_return=evaluation.realized_return,
         cost_model_id=record.cost_model_id or builder.cost_model.id,
         industry=record.industry,
         trade_state=TradeConstraintState(

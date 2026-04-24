@@ -1,5 +1,5 @@
-id = "trend_leadership_core"
-name = "Trend Leadership Core Descriptor Set"
+id = "trend_resilience_core"
+name = "Trend Resilience Core Descriptor Set"
 thesis_id = "trend_leadership"
 target_id = "open_t1_to_open_t20_net_cost"
 required_data = [
@@ -7,22 +7,22 @@ required_data = [
   "trend_stability",
   "turnover_confirmation",
 ]
-selection_logic = "cross_sectional_rank_with_turnover_confirmation"
+selection_logic = "stable_leadership_rank_with_liquidity_guardrail"
 
 [[components]]
 descriptor_id = "medium_term_relative_strength"
-role = "core_price_leadership"
-weight = 0.55
+role = "persistent_leadership"
+weight = 0.20
 transform = "cross_sectional_zscore"
 
 [[components]]
 descriptor_id = "trend_stability"
-role = "path_quality_guardrail"
-weight = 0.25
+role = "path_quality_core"
+weight = 0.55
 transform = "cross_sectional_zscore"
 
 [[components]]
 descriptor_id = "turnover_confirmation"
-role = "tradeability_confirmation"
-weight = 0.20
+role = "liquidity_confirmation"
+weight = 0.25
 transform = "cross_sectional_zscore"

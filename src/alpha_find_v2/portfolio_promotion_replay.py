@@ -103,6 +103,48 @@ class PortfolioPromotionReplayInput:
 
 
 @dataclass(slots=True)
+class ReplayIncrementalityDiagnostics:
+    average_signal_name_jaccard: float = 0.0
+    average_signal_weight_overlap: float = 0.0
+    average_portfolio_overlap_name_count: float = 0.0
+    average_candidate_only_name_count: float = 0.0
+    average_candidate_only_weight: float = 0.0
+    average_candidate_only_return_contribution: float = 0.0
+    average_shared_return_contribution: float = 0.0
+
+
+@dataclass(slots=True)
+class ReplayConcentrationDiagnostics:
+    baseline_average_name_count: float = 0.0
+    candidate_average_name_count: float = 0.0
+    baseline_average_effective_names: float = 0.0
+    candidate_average_effective_names: float = 0.0
+    baseline_average_cash_weight: float = 0.0
+    candidate_average_cash_weight: float = 0.0
+
+
+@dataclass(slots=True)
+class ReplayPeriodDelta:
+    trade_date: str
+    baseline_net_return: float
+    candidate_net_return: float
+    net_return_delta: float
+    turnover_delta: float
+
+
+@dataclass(slots=True)
+class ReplayDiagnostics:
+    incrementality: ReplayIncrementalityDiagnostics = field(
+        default_factory=ReplayIncrementalityDiagnostics
+    )
+    concentration: ReplayConcentrationDiagnostics = field(
+        default_factory=ReplayConcentrationDiagnostics
+    )
+    best_periods: list[ReplayPeriodDelta] = field(default_factory=list)
+    worst_periods: list[ReplayPeriodDelta] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class PortfolioPromotionReplayResult:
     baseline_construction: PortfolioConstructionResult
     candidate_construction: PortfolioConstructionResult
@@ -111,6 +153,7 @@ class PortfolioPromotionReplayResult:
     baseline_summary: SimulationSummary
     candidate_summary: SimulationSummary
     marginal: MarginalContributionSummary
+    diagnostics: ReplayDiagnostics
     snapshot: SleevePromotionSnapshot
     decision: PromotionDecision | None = None
 
@@ -190,6 +233,15 @@ class PortfolioPromotionReplay:
             candidate_result=candidate_simulation,
             periods_per_year=replay_input.periods_per_year,
         )
+        diagnostics = self._build_diagnostics(
+            replay_input=replay_input,
+            artifacts_by_sleeve=artifacts_by_sleeve,
+            trade_dates=trade_dates,
+            baseline_construction=baseline_construction,
+            candidate_construction=candidate_construction,
+            baseline_simulation=baseline_simulation,
+            candidate_simulation=candidate_simulation,
+        )
         snapshot = self.evaluator.to_promotion_snapshot(
             summary=candidate_summary,
             turnover_budget=self._turnover_budget(replay_input),
@@ -212,6 +264,7 @@ class PortfolioPromotionReplay:
             baseline_summary=baseline_summary,
             candidate_summary=candidate_summary,
             marginal=marginal,
+            diagnostics=diagnostics,
             snapshot=snapshot,
             decision=decision,
         )
@@ -313,3 +366,240 @@ class PortfolioPromotionReplay:
         if replay_input.turnover_budget > 0.0:
             return replay_input.turnover_budget
         return self.mandate.max_turnover_per_rebalance
+
+    def _build_diagnostics(
+        self,
+        *,
+        replay_input: PortfolioPromotionReplayInput,
+        artifacts_by_sleeve: dict[str, SleeveResearchArtifact],
+        trade_dates: list[str],
+        baseline_construction: PortfolioConstructionResult,
+        candidate_construction: PortfolioConstructionResult,
+        baseline_simulation: PortfolioSimulationResult,
+        candidate_simulation: PortfolioSimulationResult,
+    ) -> ReplayDiagnostics:
+        existing_sleeves = [
+            sleeve_id
+            for sleeve_id in replay_input.candidate_portfolio.sleeves
+            if sleeve_id in replay_input.baseline_portfolio.sleeves
+        ]
+        candidate_only_sleeves = [
+            sleeve_id
+            for sleeve_id in replay_input.candidate_portfolio.sleeves
+            if sleeve_id not in replay_input.baseline_portfolio.sleeves
+        ]
+
+        signal_name_jaccards: list[float] = []
+        signal_weight_overlaps: list[float] = []
+        for trade_date in trade_dates:
+            existing_weights = self._sleeve_group_weights(
+                sleeve_ids=existing_sleeves,
+                portfolio=replay_input.candidate_portfolio,
+                trade_date=trade_date,
+                artifacts_by_sleeve=artifacts_by_sleeve,
+            )
+            candidate_only_weights = self._sleeve_group_weights(
+                sleeve_ids=candidate_only_sleeves,
+                portfolio=replay_input.candidate_portfolio,
+                trade_date=trade_date,
+                artifacts_by_sleeve=artifacts_by_sleeve,
+            )
+            signal_name_jaccards.append(
+                self._name_jaccard(existing_weights, candidate_only_weights)
+            )
+            signal_weight_overlaps.append(
+                self._weight_overlap(existing_weights, candidate_only_weights)
+            )
+
+        baseline_steps_by_date = {
+            step.trade_date: step for step in baseline_construction.steps
+        }
+        candidate_steps_by_date = {
+            step.trade_date: step for step in candidate_construction.steps
+        }
+        baseline_simulation_by_date = {
+            step.trade_date: step for step in baseline_simulation.steps
+        }
+        candidate_simulation_by_date = {
+            step.trade_date: step for step in candidate_simulation.steps
+        }
+
+        portfolio_overlap_name_counts: list[float] = []
+        candidate_only_name_counts: list[float] = []
+        candidate_only_weights: list[float] = []
+        candidate_only_return_contributions: list[float] = []
+        shared_return_contributions: list[float] = []
+        baseline_name_counts: list[float] = []
+        candidate_name_counts: list[float] = []
+        baseline_effective_names: list[float] = []
+        candidate_effective_names: list[float] = []
+        baseline_cash_weights: list[float] = []
+        candidate_cash_weights: list[float] = []
+        period_deltas: list[ReplayPeriodDelta] = []
+
+        for trade_date in trade_dates:
+            candidate_step = candidate_steps_by_date[trade_date]
+            baseline_result_step = baseline_simulation_by_date[trade_date]
+            candidate_result_step = candidate_simulation_by_date[trade_date]
+
+            baseline_names = set(baseline_result_step.executed_weights)
+            candidate_names = set(candidate_result_step.executed_weights)
+            shared_names = baseline_names & candidate_names
+            candidate_only_names = candidate_names - baseline_names
+            candidate_returns = {
+                signal.asset_id: signal.realized_return for signal in candidate_step.signals
+            }
+
+            portfolio_overlap_name_counts.append(float(len(shared_names)))
+            candidate_only_name_counts.append(float(len(candidate_only_names)))
+            candidate_only_weights.append(
+                sum(
+                    candidate_result_step.executed_weights[asset_id]
+                    for asset_id in candidate_only_names
+                )
+            )
+            candidate_only_return_contributions.append(
+                sum(
+                    candidate_result_step.executed_weights[asset_id]
+                    * candidate_returns[asset_id]
+                    for asset_id in candidate_only_names
+                )
+            )
+            shared_return_contributions.append(
+                sum(
+                    candidate_result_step.executed_weights[asset_id]
+                    * candidate_returns[asset_id]
+                    for asset_id in shared_names
+                )
+            )
+            baseline_name_counts.append(float(len(baseline_result_step.executed_weights)))
+            candidate_name_counts.append(float(len(candidate_result_step.executed_weights)))
+            baseline_effective_names.append(
+                self._effective_name_count(baseline_result_step.executed_weights)
+            )
+            candidate_effective_names.append(
+                self._effective_name_count(candidate_result_step.executed_weights)
+            )
+            baseline_cash_weights.append(
+                max(1.0 - sum(baseline_result_step.executed_weights.values()), 0.0)
+            )
+            candidate_cash_weights.append(
+                max(1.0 - sum(candidate_result_step.executed_weights.values()), 0.0)
+            )
+            period_deltas.append(
+                ReplayPeriodDelta(
+                    trade_date=trade_date,
+                    baseline_net_return=baseline_result_step.net_return,
+                    candidate_net_return=candidate_result_step.net_return,
+                    net_return_delta=(
+                        candidate_result_step.net_return - baseline_result_step.net_return
+                    ),
+                    turnover_delta=(
+                        candidate_result_step.turnover - baseline_result_step.turnover
+                    ),
+                )
+            )
+
+        return ReplayDiagnostics(
+            incrementality=ReplayIncrementalityDiagnostics(
+                average_signal_name_jaccard=self._average(signal_name_jaccards),
+                average_signal_weight_overlap=self._average(signal_weight_overlaps),
+                average_portfolio_overlap_name_count=self._average(
+                    portfolio_overlap_name_counts
+                ),
+                average_candidate_only_name_count=self._average(candidate_only_name_counts),
+                average_candidate_only_weight=self._average(candidate_only_weights),
+                average_candidate_only_return_contribution=self._average(
+                    candidate_only_return_contributions
+                ),
+                average_shared_return_contribution=self._average(
+                    shared_return_contributions
+                ),
+            ),
+            concentration=ReplayConcentrationDiagnostics(
+                baseline_average_name_count=self._average(baseline_name_counts),
+                candidate_average_name_count=self._average(candidate_name_counts),
+                baseline_average_effective_names=self._average(baseline_effective_names),
+                candidate_average_effective_names=self._average(candidate_effective_names),
+                baseline_average_cash_weight=self._average(baseline_cash_weights),
+                candidate_average_cash_weight=self._average(candidate_cash_weights),
+            ),
+            best_periods=sorted(
+                period_deltas,
+                key=lambda period: (-period.net_return_delta, period.trade_date),
+            )[:3],
+            worst_periods=sorted(
+                period_deltas,
+                key=lambda period: (period.net_return_delta, period.trade_date),
+            )[:3],
+        )
+
+    def _sleeve_group_weights(
+        self,
+        *,
+        sleeve_ids: list[str],
+        portfolio: PortfolioRecipe,
+        trade_date: str,
+        artifacts_by_sleeve: dict[str, SleeveResearchArtifact],
+    ) -> dict[str, float]:
+        group_weights: dict[str, float] = {}
+        for sleeve_id in sleeve_ids:
+            budget = portfolio.allocation.get(sleeve_id, 0.0)
+            if budget <= 0.0:
+                continue
+            step = artifacts_by_sleeve[sleeve_id].step_for_date(trade_date)
+            total_target_weight = sum(
+                record.target_weight for record in step.records if record.target_weight > 0.0
+            )
+            if total_target_weight <= 0.0:
+                continue
+            scale = budget / total_target_weight
+            for record in step.records:
+                if record.target_weight <= 0.0:
+                    continue
+                group_weights[record.asset_id] = (
+                    group_weights.get(record.asset_id, 0.0)
+                    + record.target_weight * scale
+                )
+        return group_weights
+
+    def _name_jaccard(
+        self,
+        left_weights: dict[str, float],
+        right_weights: dict[str, float],
+    ) -> float:
+        if not left_weights or not right_weights:
+            return 0.0
+        left_names = set(left_weights)
+        right_names = set(right_weights)
+        union = left_names | right_names
+        if not union:
+            return 0.0
+        return len(left_names & right_names) / len(union)
+
+    def _weight_overlap(
+        self,
+        left_weights: dict[str, float],
+        right_weights: dict[str, float],
+    ) -> float:
+        if not left_weights or not right_weights:
+            return 0.0
+        return sum(
+            min(left_weights[asset_id], right_weights[asset_id])
+            for asset_id in set(left_weights) & set(right_weights)
+        )
+
+    def _effective_name_count(self, weights: dict[str, float]) -> float:
+        invested_weight = sum(weights.values())
+        if invested_weight <= 0.0:
+            return 0.0
+        normalized_weights = [weight / invested_weight for weight in weights.values() if weight > 0.0]
+        denominator = sum(weight * weight for weight in normalized_weights)
+        if denominator <= 0.0:
+            return 0.0
+        return 1.0 / denominator
+
+    def _average(self, values: list[float]) -> float:
+        if not values:
+            return 0.0
+        return sum(values) / len(values)

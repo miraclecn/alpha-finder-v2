@@ -7,34 +7,22 @@
       "records": [
         {
           "asset_id": "BBB",
-          "rank": 1,
-          "score": 9.2,
-          "target_weight": 0.55,
-          "entry_open": 10.0,
-          "exit_open": 10.224,
-          "industry": "tech",
-          "residual_components": {
-            "benchmark": 0.0,
-            "industry": 0.0,
-            "size": 0.0,
-            "beta": 0.0
-          }
-        },
-        {
-          "asset_id": "DDD",
-          "rank": 2,
-          "score": 8.4,
-          "target_weight": 0.45,
-          "entry_open": 10.0,
-          "exit_open": 10.324,
-          "industry": "industrial",
-          "residual_components": {
-            "benchmark": 0.0,
-            "industry": 0.0,
-            "size": 0.0,
-            "beta": 0.0
-          }
-        }
+        "rank": 1,
+        "score": 9.2,
+        "target_weight": 0.55,
+        "entry_open": 10.0,
+        "exit_open": 10.224,
+        "industry": "tech"
+      },
+      {
+        "asset_id": "DDD",
+        "rank": 2,
+        "score": 8.4,
+        "target_weight": 0.45,
+        "entry_open": 10.0,
+        "exit_open": 10.324,
+        "industry": "industrial"
+      }
       ]
     },
     {
@@ -42,34 +30,22 @@
       "records": [
         {
           "asset_id": "AAA",
-          "rank": 1,
-          "score": 9.0,
-          "target_weight": 0.40,
-          "entry_open": 10.0,
-          "exit_open": 10.174,
-          "industry": "bank",
-          "residual_components": {
-            "benchmark": 0.0,
-            "industry": 0.0,
-            "size": 0.0,
-            "beta": 0.0
-          }
-        },
-        {
-          "asset_id": "DDD",
-          "rank": 2,
-          "score": 8.3,
-          "target_weight": 0.60,
-          "entry_open": 10.0,
-          "exit_open": 10.224,
-          "industry": "industrial",
-          "residual_components": {
-            "benchmark": 0.0,
-            "industry": 0.0,
-            "size": 0.0,
-            "beta": 0.0
-          }
-        }
+        "rank": 1,
+        "score": 9.0,
+        "target_weight": 0.40,
+        "entry_open": 10.0,
+        "exit_open": 10.174,
+        "industry": "bank"
+      },
+      {
+        "asset_id": "DDD",
+        "rank": 2,
+        "score": 8.3,
+        "target_weight": 0.60,
+        "entry_open": 10.0,
+        "exit_open": 10.224,
+        "industry": "industrial"
+      }
       ]
     },
     {
@@ -77,35 +53,23 @@
       "records": [
         {
           "asset_id": "CCC",
-          "rank": 1,
-          "score": 9.1,
-          "target_weight": 0.50,
-          "entry_open": 10.0,
-          "exit_open": 10.174,
-          "industry": "tech",
-          "residual_components": {
-            "benchmark": 0.0,
-            "industry": 0.0,
-            "size": 0.0,
-            "beta": 0.0
-          }
-        },
-        {
-          "asset_id": "EEE",
-          "rank": 2,
-          "score": 8.2,
-          "target_weight": 0.50,
-          "entry_open": 10.0,
-          "exit_open": 10.274,
-          "industry": "industrial",
-          "residual_components": {
-            "benchmark": 0.0,
-            "industry": 0.0,
-            "size": 0.0,
-            "beta": 0.0
-          }
-        }
-      ]
-    }
-  ]
+        "rank": 1,
+        "score": 9.1,
+        "target_weight": 0.50,
+        "entry_open": 10.0,
+        "exit_open": 10.174,
+        "industry": "tech"
+      },
+      {
+        "asset_id": "EEE",
+        "rank": 2,
+        "score": 8.2,
+        "target_weight": 0.50,
+        "entry_open": 10.0,
+        "exit_open": 10.274,
+        "industry": "industrial"
+      }
+    ]
+  }
+]
 }

@@ -44,6 +44,7 @@ class TargetEvaluation:
     excluded_reasons: list[str] = field(default_factory=list)
     gross_return: float | None = None
     net_return: float | None = None
+    realized_return: float | None = None
     residual_return: float | None = None
     round_trip_cost_bps: float = 0.0
     common_return: float = 0.0
@@ -65,7 +66,7 @@ class ExecutableResidualTargetBuilder:
             cost_model_id=self.cost_model.id,
             risk_model_id=self.target.risk_model_id,
             round_trip_cost_bps=self.cost_model.round_trip_bps(),
-            label_name=f"{self.target.id}__residual_net_return",
+            label_name=f"{self.target.id}__{self.target.label_kind}",
             required_residual_components=list(self.target.residualization),
             eligibility_rules=list(self.target.eligibility),
         )
@@ -91,13 +92,18 @@ class ExecutableResidualTargetBuilder:
             residual_components[component]
             for component in self.target.residualization
         )
-        residual_return = net_return - common_return
+        residual_return = None
+        realized_return = net_return
+        if self.target.label_kind == "residual_net_return":
+            residual_return = net_return - common_return
+            realized_return = residual_return
 
         return TargetEvaluation(
             eligible=not excluded_reasons,
             excluded_reasons=excluded_reasons,
             gross_return=gross_return,
             net_return=net_return,
+            realized_return=realized_return,
             residual_return=residual_return,
             round_trip_cost_bps=self.cost_model.round_trip_bps(),
             common_return=common_return,
@@ -122,6 +128,16 @@ class ExecutableResidualTargetBuilder:
             raise ValueError(f"Unsupported trade_exit: {self.target.trade_exit}")
         if self.target.return_basis != "open_to_open":
             raise ValueError(f"Unsupported return_basis: {self.target.return_basis}")
+        if self.target.label_kind not in {"net_return", "residual_net_return"}:
+            raise ValueError(f"Unsupported label_kind: {self.target.label_kind}")
+        if self.target.label_kind == "net_return":
+            if self.target.residualization:
+                raise ValueError("Non-residual targets must not define residualization components.")
+            if self.target.risk_model_id:
+                raise ValueError("Non-residual targets must not bind a risk model.")
+            return
+        if not self.target.residualization:
+            raise ValueError("Residual targets must define residualization components.")
 
     def _entry_offset_days(self) -> int:
         return 1

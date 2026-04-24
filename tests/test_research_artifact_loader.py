@@ -44,6 +44,7 @@ class ResearchArtifactLoaderTest(unittest.TestCase):
         step = artifact.step_for_date("2026-04-20")
         self.assertEqual(artifact.benchmark_id, "CSI 800")
         self.assertEqual(artifact.classification, "citics_l1")
+        self.assertEqual(artifact.weighting_method, "manual_sample")
         self.assertEqual(step.trade_date, "2026-04-20")
         self.assertEqual(step.available_at, "2026-04-20T15:30:00+08:00")
         self.assertAlmostEqual(

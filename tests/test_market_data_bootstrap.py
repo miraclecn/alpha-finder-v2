@@ -203,6 +203,67 @@ def _create_source_db(path: Path) -> None:
     conn.close()
 
 
+def _create_supplemental_pit_db(path: Path) -> None:
+    conn = duckdb.connect(str(path))
+    conn.execute(
+        """
+        CREATE TABLE industry_classification_pit (
+            security_id VARCHAR,
+            industry_schema VARCHAR,
+            industry_code VARCHAR,
+            effective_at VARCHAR,
+            removed_at VARCHAR
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE benchmark_membership_pit (
+            benchmark_id VARCHAR,
+            security_id VARCHAR,
+            effective_at VARCHAR,
+            removed_at VARCHAR
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE benchmark_weight_snapshot_pit (
+            benchmark_id VARCHAR,
+            security_id VARCHAR,
+            trade_date VARCHAR,
+            weight DOUBLE
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO industry_classification_pit VALUES
+        ('000001.SZ', 'citics_l1', 'bank', '20200101', NULL),
+        ('300001.SZ', 'citics_l1', 'industrial', '20200101', NULL),
+        ('688001.SH', 'citics_l1', 'tech', '20200101', NULL)
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO benchmark_membership_pit VALUES
+        ('CSI 800', '000001.SZ', '20200101', NULL),
+        ('CSI 800', '300001.SZ', '20200101', NULL),
+        ('CSI 800', '688001.SH', '20200101', NULL)
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO benchmark_weight_snapshot_pit VALUES
+        ('CSI 800', '000001.SZ', '20240102', 65.0),
+        ('CSI 800', '300001.SZ', '20240102', 35.0),
+        ('CSI 800', '000001.SZ', '20240103', 55.0),
+        ('CSI 800', '688001.SH', '20240103', 45.0)
+        """
+    )
+    conn.close()
+
+
 class MarketDataBootstrapTest(unittest.TestCase):
     def test_build_research_source_db_materializes_green_and_amber_tables(self) -> None:
         from alpha_find_v2.market_data_bootstrap import build_research_source_db
@@ -391,6 +452,92 @@ class MarketDataBootstrapTest(unittest.TestCase):
                     7000.0,
                     105000.0,
                 ),
+            )
+            conn.close()
+
+    def test_build_research_source_db_imports_staged_pit_reference_tables(self) -> None:
+        from alpha_find_v2.market_data_bootstrap import build_research_source_db
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            source_db = temp_root / "source.duckdb"
+            supplemental_db = temp_root / "supplemental.duckdb"
+            target_db = temp_root / "target.duckdb"
+            _create_source_db(source_db)
+            _create_supplemental_pit_db(supplemental_db)
+
+            build_research_source_db(
+                source_db,
+                target_db,
+                supplemental_db=supplemental_db,
+            )
+
+            conn = duckdb.connect(str(target_db), read_only=True)
+            registry_rows = conn.execute(
+                """
+                SELECT dataset_id, status
+                FROM dataset_registry
+                WHERE dataset_id IN (
+                    'benchmark_membership_pit',
+                    'benchmark_weight_snapshot_pit',
+                    'industry_classification_pit'
+                )
+                ORDER BY dataset_id
+                """
+            ).fetchall()
+            self.assertEqual(
+                registry_rows,
+                [
+                    ("benchmark_membership_pit", "green"),
+                    ("benchmark_weight_snapshot_pit", "green"),
+                    ("industry_classification_pit", "green"),
+                ],
+            )
+            membership_rows = conn.execute(
+                """
+                SELECT benchmark_id, security_id
+                FROM benchmark_membership_pit
+                ORDER BY benchmark_id, security_id
+                """
+            ).fetchall()
+            self.assertEqual(
+                membership_rows,
+                [
+                    ("CSI 800", "000001.SZ"),
+                    ("CSI 800", "300001.SZ"),
+                    ("CSI 800", "688001.SH"),
+                ],
+            )
+            industry_rows = conn.execute(
+                """
+                SELECT security_id, industry_schema, industry_code
+                FROM industry_classification_pit
+                ORDER BY security_id
+                """
+            ).fetchall()
+            self.assertEqual(
+                industry_rows,
+                [
+                    ("000001.SZ", "citics_l1", "bank"),
+                    ("300001.SZ", "citics_l1", "industrial"),
+                    ("688001.SH", "citics_l1", "tech"),
+                ],
+            )
+            weight_rows = conn.execute(
+                """
+                SELECT benchmark_id, security_id, trade_date, weight
+                FROM benchmark_weight_snapshot_pit
+                ORDER BY benchmark_id, trade_date, security_id
+                """
+            ).fetchall()
+            self.assertEqual(
+                weight_rows,
+                [
+                    ("CSI 800", "000001.SZ", "20240102", 65.0),
+                    ("CSI 800", "300001.SZ", "20240102", 35.0),
+                    ("CSI 800", "000001.SZ", "20240103", 55.0),
+                    ("CSI 800", "688001.SH", "20240103", 45.0),
+                ],
             )
             conn.close()
 

@@ -3,6 +3,7 @@
   "artifact_type": "benchmark_state_history",
   "benchmark_id": "CSI 800",
   "classification": "citics_l1",
+  "weighting_method": "manual_sample",
   "steps": [
     {
       "trade_date": "2026-04-06",

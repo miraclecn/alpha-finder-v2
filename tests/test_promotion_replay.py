@@ -165,6 +165,45 @@ class PortfolioPromotionReplayTest(unittest.TestCase):
         self.assertIn("cost_scenario:base", result.decision.passed_checks)
         self.assertIn("regime:bull", result.decision.passed_checks)
 
+        self.assertAlmostEqual(
+            result.diagnostics.incrementality.average_signal_name_jaccard,
+            1.0 / 3.0,
+        )
+        self.assertAlmostEqual(
+            result.diagnostics.incrementality.average_signal_weight_overlap,
+            0.18666666666666668,
+        )
+        self.assertAlmostEqual(
+            result.diagnostics.incrementality.average_portfolio_overlap_name_count,
+            2.0,
+        )
+        self.assertAlmostEqual(
+            result.diagnostics.incrementality.average_candidate_only_name_count,
+            1.0,
+        )
+        self.assertAlmostEqual(
+            result.diagnostics.incrementality.average_candidate_only_weight,
+            0.21333333333333335,
+        )
+        self.assertAlmostEqual(
+            result.diagnostics.incrementality.average_candidate_only_return_contribution,
+            0.005266666666666667,
+        )
+        self.assertAlmostEqual(
+            result.diagnostics.incrementality.average_shared_return_contribution,
+            0.008245833333333332,
+        )
+        self.assertAlmostEqual(
+            result.diagnostics.concentration.baseline_average_effective_names,
+            1.9487179487179487,
+        )
+        self.assertAlmostEqual(
+            result.diagnostics.concentration.candidate_average_effective_names,
+            2.79630456659678,
+        )
+        self.assertEqual(result.diagnostics.best_periods[0].trade_date, "2026-04-20")
+        self.assertEqual(result.diagnostics.worst_periods[0].trade_date, "2026-04-13")
+
     def _baseline_portfolio(self) -> PortfolioRecipe:
         return PortfolioRecipe(
             id="baseline_portfolio",

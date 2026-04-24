@@ -1,0 +1,17 @@
+schema_version = 1
+artifact_type = "trend_research_input_build_case"
+case_id = "trend_resilience_core_duckdb"
+description = "Build a second weekly real-output trend sleeve from the isolated V2 research-source DuckDB using the same honest 2025-08-29+ decision calendar."
+sleeve_path = "config/sleeves/trend_resilience_core.toml"
+source_db_path = "output/research_source.duckdb"
+output_path = "output/trend_resilience_core_input.json"
+start_date = "20250829"
+min_listing_days = 120
+lookback_days = 60
+short_window_days = 20
+turnover_window_days = 20
+rebalance_stride = 5
+industry_label_source = "industry_classification_pit"
+industry_schema = "sw2021_l1"
+limit_lock_mode = "cn_a_directional_open_lock"
+residualization_mode = "non_residual_target"

@@ -3,7 +3,7 @@
   "artifact_type": "sleeve_research_artifact",
   "sleeve_id": "trend_leadership_core",
   "mandate_id": "a_share_long_only_eod",
-  "target_id": "open_t1_to_open_t20_residual_net_cost",
+  "target_id": "open_t1_to_open_t20_net_cost",
   "steps": [
     {
       "trade_date": "2026-04-06",

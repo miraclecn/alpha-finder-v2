@@ -1,0 +1,20 @@
+id = "trend_real_output_candidate_portfolio"
+name = "Trend Plus Resilience Real Output Portfolio"
+mandate_id = "a_share_long_only_eod"
+benchmark = "CSI 800"
+rebalance_policy = "weekly"
+description = "Candidate weekly real-output book that combines the primary trend sleeve with a more defensive resilience sleeve on the same decision calendar."
+construction_model_id = "a_share_core_blend"
+promotion_gate_id = "research_example_replay_gate"
+execution_policy_id = "a_share_next_open_v1"
+decay_monitor_id = "a_share_core_watch"
+sleeves = ["trend_leadership_core", "trend_resilience_core"]
+
+[allocation]
+trend_leadership_core = 0.50
+trend_resilience_core = 0.50
+
+[constraints]
+max_names = 20
+max_single_name_weight = 0.08
+max_industry_overweight = 0.10

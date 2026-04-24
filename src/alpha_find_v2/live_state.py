@@ -33,6 +33,7 @@ class BenchmarkStateStep:
 class BenchmarkStateArtifact:
     benchmark_id: str
     classification: str
+    weighting_method: str = ""
     steps: list[BenchmarkStateStep] = field(default_factory=list)
 
     def step_for_date(self, trade_date: str) -> BenchmarkStateStep:
@@ -114,6 +115,7 @@ def load_benchmark_state_artifact(path: Path | str) -> BenchmarkStateArtifact:
         artifact = BenchmarkStateArtifact(
             benchmark_id=str(payload["benchmark_id"]),
             classification=str(payload["classification"]),
+            weighting_method=str(payload.get("weighting_method", "")),
             steps=steps,
         )
         _validate_benchmark_state_artifact(artifact)
@@ -123,6 +125,7 @@ def load_benchmark_state_artifact(path: Path | str) -> BenchmarkStateArtifact:
         artifact = BenchmarkStateArtifact(
             benchmark_id=str(payload["benchmark"]),
             classification=str(payload["classification"]),
+            weighting_method=str(payload.get("weighting_method", "")),
             steps=[
                 BenchmarkStateStep(
                     trade_date=str(trade_date),

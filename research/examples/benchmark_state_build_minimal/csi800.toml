@@ -1,0 +1,12 @@
+schema_version = 1
+artifact_type = "benchmark_state_build_case"
+case_id = "csi800_benchmark_state_from_research_source"
+description = "Build a PIT CSI 800 benchmark-state history artifact from audited provider weights and SW2021 industry data."
+source_db_path = "output/research_source.duckdb"
+output_path = "output/csi800_benchmark_state_history.json"
+benchmark_id = "CSI 800"
+industry_schema = "sw2021_l1"
+start_date = "20250829"
+weighting_method = "provider_weight"
+effective_time = "15:00:00+08:00"
+available_time = "15:30:00+08:00"

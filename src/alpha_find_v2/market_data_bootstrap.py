@@ -19,15 +19,26 @@ def _board_case_sql(alias: str) -> str:
     """
 
 
-def build_research_source_db(source_db: str | Path, target_db: str | Path) -> dict[str, Any]:
+def build_research_source_db(
+    source_db: str | Path,
+    target_db: str | Path,
+    supplemental_db: str | Path | None = None,
+) -> dict[str, Any]:
     import duckdb
 
     source_path = Path(source_db).expanduser().resolve()
     target_path = Path(target_db).expanduser().resolve()
+    supplemental_path = (
+        Path(supplemental_db).expanduser().resolve()
+        if supplemental_db is not None
+        else None
+    )
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
     conn = duckdb.connect(str(target_path))
     conn.execute(f"ATTACH '{_sql_path(source_path)}' AS source")
+    if supplemental_path is not None:
+        conn.execute(f"ATTACH '{_sql_path(supplemental_path)}' AS supplemental")
 
     board_case = _board_case_sql("s")
     conn.execute(
@@ -238,6 +249,38 @@ def build_research_source_db(source_db: str | Path, target_db: str | Path) -> di
         """
     )
 
+    imported_industry = _materialize_optional_pit_table(
+        conn,
+        table_name="industry_classification_pit",
+        required_columns={
+            "security_id",
+            "industry_schema",
+            "industry_code",
+            "effective_at",
+            "removed_at",
+        },
+    )
+    imported_benchmark = _materialize_optional_pit_table(
+        conn,
+        table_name="benchmark_membership_pit",
+        required_columns={
+            "benchmark_id",
+            "security_id",
+            "effective_at",
+            "removed_at",
+        },
+    )
+    imported_benchmark_weights = _materialize_optional_pit_table(
+        conn,
+        table_name="benchmark_weight_snapshot_pit",
+        required_columns={
+            "benchmark_id",
+            "security_id",
+            "trade_date",
+            "weight",
+        },
+    )
+
     conn.execute(
         """
         CREATE OR REPLACE TABLE dataset_registry AS
@@ -294,9 +337,50 @@ def build_research_source_db(source_db: str | Path, target_db: str | Path) -> di
             MIN(list_date),
             MAX(COALESCE(delist_date, list_date))
         FROM security_master_ref
-        ORDER BY dataset_id
         """
     )
+    if imported_benchmark:
+        conn.execute(
+            f"""
+            INSERT INTO dataset_registry
+            SELECT
+                'benchmark_membership_pit',
+                'green',
+                'historical benchmark membership staged explicitly for V2 PIT replay',
+                COUNT(*),
+                MIN({_date_key_sql('effective_at')}),
+                MAX(COALESCE({_date_key_sql('removed_at')}, {_date_key_sql('effective_at')}))
+            FROM benchmark_membership_pit
+            """
+        )
+    if imported_benchmark_weights:
+        conn.execute(
+            """
+            INSERT INTO dataset_registry
+            SELECT
+                'benchmark_weight_snapshot_pit',
+                'green',
+                'historical provider benchmark weights staged explicitly for V2 PIT replay',
+                COUNT(*),
+                MIN(trade_date),
+                MAX(trade_date)
+            FROM benchmark_weight_snapshot_pit
+            """
+        )
+    if imported_industry:
+        conn.execute(
+            f"""
+            INSERT INTO dataset_registry
+            SELECT
+                'industry_classification_pit',
+                'green',
+                'historical PIT industry classification staged explicitly for V2 research',
+                COUNT(*),
+                MIN({_date_key_sql('effective_at')}),
+                MAX(COALESCE({_date_key_sql('removed_at')}, {_date_key_sql('effective_at')}))
+            FROM industry_classification_pit
+            """
+        )
 
     summary_rows = conn.execute(
         """
@@ -305,11 +389,14 @@ def build_research_source_db(source_db: str | Path, target_db: str | Path) -> di
         ORDER BY dataset_id
         """
     ).fetchall()
+    if supplemental_path is not None:
+        conn.execute("DETACH supplemental")
     conn.execute("DETACH source")
     conn.close()
 
     return {
         "source_db": str(source_path),
+        "supplemental_db": str(supplemental_path) if supplemental_path is not None else "",
         "target_db": str(target_path),
         "datasets": [
             {
@@ -322,3 +409,108 @@ def build_research_source_db(source_db: str | Path, target_db: str | Path) -> di
             for dataset_id, status, row_count, earliest_date, latest_date in summary_rows
         ],
     }
+
+
+def _materialize_optional_pit_table(
+    conn: Any,
+    *,
+    table_name: str,
+    required_columns: set[str],
+) -> bool:
+    source_alias = _preferred_attached_source(conn, table_name)
+    if source_alias is None:
+        return False
+
+    columns = _table_columns(conn, source_alias, table_name)
+    missing_columns = sorted(required_columns - columns)
+    if missing_columns:
+        raise ValueError(
+            f"{source_alias}.{table_name} is missing required columns: {', '.join(missing_columns)}"
+        )
+
+    if table_name == "industry_classification_pit":
+        conn.execute(
+            f"""
+            CREATE OR REPLACE TABLE industry_classification_pit AS
+            SELECT
+                CAST(security_id AS VARCHAR) AS security_id,
+                CAST(industry_schema AS VARCHAR) AS industry_schema,
+                CAST(industry_code AS VARCHAR) AS industry_code,
+                CAST(effective_at AS VARCHAR) AS effective_at,
+                NULLIF(CAST(removed_at AS VARCHAR), '') AS removed_at
+            FROM {source_alias}.industry_classification_pit
+            """
+        )
+        return True
+
+    if table_name == "benchmark_membership_pit":
+        conn.execute(
+            f"""
+            CREATE OR REPLACE TABLE benchmark_membership_pit AS
+            SELECT
+                CAST(benchmark_id AS VARCHAR) AS benchmark_id,
+                CAST(security_id AS VARCHAR) AS security_id,
+                CAST(effective_at AS VARCHAR) AS effective_at,
+                NULLIF(CAST(removed_at AS VARCHAR), '') AS removed_at
+            FROM {source_alias}.benchmark_membership_pit
+            """
+        )
+        return True
+
+    if table_name == "benchmark_weight_snapshot_pit":
+        conn.execute(
+            f"""
+            CREATE OR REPLACE TABLE benchmark_weight_snapshot_pit AS
+            SELECT
+                CAST(benchmark_id AS VARCHAR) AS benchmark_id,
+                CAST(security_id AS VARCHAR) AS security_id,
+                CAST(trade_date AS VARCHAR) AS trade_date,
+                CAST(weight AS DOUBLE) AS weight
+            FROM {source_alias}.benchmark_weight_snapshot_pit
+            """
+        )
+        return True
+
+    raise ValueError(f"Unsupported optional PIT table import: {table_name}")
+
+
+def _preferred_attached_source(conn: Any, table_name: str) -> str | None:
+    for database_name in ("supplemental", "source"):
+        if _table_exists(conn, database_name, table_name):
+            return database_name
+    return None
+
+
+def _table_exists(conn: Any, database_name: str, table_name: str) -> bool:
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM duckdb_tables()
+        WHERE database_name = ? AND table_name = ?
+        LIMIT 1
+        """,
+        [database_name, table_name],
+    ).fetchone()
+    return row is not None
+
+
+def _table_columns(conn: Any, database_name: str, table_name: str) -> set[str]:
+    rows = conn.execute(
+        """
+        SELECT column_name
+        FROM duckdb_columns()
+        WHERE database_name = ? AND table_name = ?
+        """,
+        [database_name, table_name],
+    ).fetchall()
+    return {str(column_name) for (column_name,) in rows}
+
+
+def _date_key_sql(column_name: str) -> str:
+    return f"""
+        CASE
+            WHEN {column_name} IS NULL OR trim({column_name}) = '' THEN NULL
+            WHEN length(trim({column_name})) = 8 THEN trim({column_name})
+            ELSE strftime(CAST({column_name} AS TIMESTAMP), '%Y%m%d')
+        END
+    """

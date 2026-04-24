@@ -1,0 +1,17 @@
+schema_version = 1
+artifact_type = "executable_signal_case"
+
+case_id = "trend_real_output_next_open_20260319"
+description = "Build the next-open executable signal package from generated CSI 800 benchmark state and trend-leadership sleeve artifacts on 20260319."
+portfolio_path = "research/examples/deployment_minimal/trend_real_output_portfolio.toml"
+default_cost_model_path = "config/cost_models/base_a_share_cash.toml"
+additional_cost_model_paths = [
+  "config/cost_models/high_a_share_cash.toml",
+]
+artifact_paths = [
+  "output/trend_leadership_core_artifact.json",
+]
+benchmark_state_path = "output/csi800_benchmark_state_history.json"
+account_state_path = "research/examples/deployment_minimal/account_state_20260319_trend_real.json"
+trade_date = "20260319"
+execution_date = "20260320"

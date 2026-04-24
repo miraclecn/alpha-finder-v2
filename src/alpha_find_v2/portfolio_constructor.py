@@ -197,6 +197,16 @@ class PortfolioConstructor:
             raise ValueError(
                 "Benchmark industry weights are required for benchmark-relative industry caps."
             )
+        missing_industry_assets = sorted(
+            asset_id
+            for asset_id in combined_weights
+            if not metadata_by_asset[asset_id].industry.strip()
+        )
+        if missing_industry_assets:
+            raise ValueError(
+                "Industry labels are required for benchmark-relative industry caps: "
+                f"{', '.join(missing_industry_assets)}"
+            )
 
         grouped_assets: dict[str, list[str]] = {}
         for asset_id in combined_weights:

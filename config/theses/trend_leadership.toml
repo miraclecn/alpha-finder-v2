@@ -28,6 +28,6 @@ falsification_rules = [
 portfolio_role = "primary medium-horizon alpha sleeve"
 
 [validation]
-primary_target = "20d_executable_residual_return_net_cost"
+primary_target = "20d_executable_net_return_interim"
 cost_scenarios = ["base", "high"]
 must_pass_regimes = ["bull", "bear", "high_dispersion", "low_dispersion"]

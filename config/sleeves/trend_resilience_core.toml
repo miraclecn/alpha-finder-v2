@@ -1,21 +1,21 @@
-id = "trend_leadership_core"
-name = "Trend Leadership Core Sleeve"
+id = "trend_resilience_core"
+name = "Trend Resilience Core Sleeve"
 mandate_id = "a_share_long_only_eod"
 thesis_id = "trend_leadership"
-descriptor_set_id = "trend_leadership_core"
+descriptor_set_id = "trend_resilience_core"
 target_id = "open_t1_to_open_t20_net_cost"
 universe = "investable_a_share_core"
 rebalance_frequency = "weekly"
 target_holding_days = 20
-turnover_budget = 0.16
+turnover_budget = 0.12
 execution_rule = "next_day_open"
 neutralization = ["industry", "size", "beta"]
 
 [construction]
 selection = "rank_then_cap_weight"
-holding_count = 16
+holding_count = 18
 weight_cap = 0.07
 
 [constraints]
-min_median_daily_turnover_cny_mn = 80
+min_median_daily_turnover_cny_mn = 120
 exclude_price_limit_lock = true

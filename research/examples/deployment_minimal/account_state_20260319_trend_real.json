@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "artifact_type": "account_state_snapshot",
+  "account_id": "shadow_a_share_cash",
+  "as_of_date": "20260319",
+  "total_equity_cny": 10000000.0,
+  "cash_balance_cny": 200000.0,
+  "available_cash_cny": 200000.0,
+  "positions": [
+    {
+      "asset_id": "002969.SZ",
+      "shares": 61250.0,
+      "available_shares": 61250.0,
+      "market_value_cny": 612500.0
+    },
+    {
+      "asset_id": "001896.SZ",
+      "shares": 61250.0,
+      "available_shares": 61250.0,
+      "market_value_cny": 612500.0
+    },
+    {
+      "asset_id": "688125.SH",
+      "shares": 61250.0,
+      "available_shares": 61250.0,
+      "market_value_cny": 612500.0
+    },
+    {
+      "asset_id": "002931.SZ",
+      "shares": 61250.0,
+      "available_shares": 61250.0,
+      "market_value_cny": 612500.0
+    },
+    {
+      "asset_id": "001331.SZ",
+      "shares": 61250.0,
+      "available_shares": 61250.0,
+      "market_value_cny": 612500.0
+    },
+    {
+      "asset_id": "002378.SZ",
+      "shares": 61250.0,
+      "available_shares": 61250.0,
+      "market_value_cny": 612500.0
+    },
+    {
+      "asset_id": "002796.SZ",
+      "shares": 61250.0,
+      "available_shares": 61250.0,
+      "market_value_cny": 612500.0
+    },
+    {
+      "asset_id": "300164.SZ",
+      "shares": 61250.0,
+      "available_shares": 61250.0,
+      "market_value_cny": 612500.0
+    },
+    {
+      "asset_id": "300749.SZ",
+      "shares": 61250.0,
+      "available_shares": 61250.0,
+      "market_value_cny": 612500.0
+    },
+    {
+      "asset_id": "002842.SZ",
+      "shares": 61250.0,
+      "available_shares": 61250.0,
+      "market_value_cny": 612500.0
+    },
+    {
+      "asset_id": "688308.SH",
+      "shares": 61250.0,
+      "available_shares": 61250.0,
+      "market_value_cny": 612500.0
+    },
+    {
+      "asset_id": "002498.SZ",
+      "shares": 61250.0,
+      "available_shares": 0.0,
+      "market_value_cny": 612500.0
+    },
+    {
+      "asset_id": "301338.SZ",
+      "shares": 61250.0,
+      "available_shares": 61250.0,
+      "market_value_cny": 612500.0
+    },
+    {
+      "asset_id": "601869.SH",
+      "shares": 61250.0,
+      "available_shares": 61250.0,
+      "market_value_cny": 612500.0
+    },
+    {
+      "asset_id": "600722.SH",
+      "shares": 61250.0,
+      "available_shares": 61250.0,
+      "market_value_cny": 612500.0
+    },
+    {
+      "asset_id": "300461.SZ",
+      "shares": 61250.0,
+      "available_shares": 61250.0,
+      "market_value_cny": 612500.0
+    }
+  ],
+  "trade_restrictions": [
+    {
+      "asset_id": "002498.SZ",
+      "can_enter": true,
+      "can_exit": false,
+      "reason": "suspended"
+    },
+    {
+      "asset_id": "920088.BJ",
+      "can_enter": false,
+      "can_exit": true,
+      "reason": "entry_limit_up_locked"
+    }
+  ]
+}

@@ -66,6 +66,27 @@ class ExecutableResidualTargetBuilderTest(unittest.TestCase):
         self.assertFalse(evaluation.eligible)
         self.assertIn("entry_limit_locked", evaluation.excluded_reasons)
 
+    def test_evaluate_supports_honest_non_residual_net_target(self) -> None:
+        target = load_target(CONFIG_ROOT / "targets" / "open_t1_to_open_t20_net_cost.toml")
+        cost_model = load_cost_model(CONFIG_ROOT / "cost_models" / "base_a_share_cash.toml")
+
+        definition = ExecutableResidualTargetBuilder(target, cost_model).definition()
+        evaluation = ExecutableResidualTargetBuilder(target, cost_model).evaluate(
+            TargetObservation(
+                entry_open=10.0,
+                exit_open=10.224,
+            )
+        )
+
+        self.assertEqual(definition.label_name, "open_t1_to_open_t20_net_cost__net_return")
+        self.assertEqual(definition.required_residual_components, [])
+        self.assertTrue(evaluation.eligible)
+        self.assertAlmostEqual(evaluation.gross_return, 0.0224)
+        self.assertAlmostEqual(evaluation.net_return, 0.0200)
+        self.assertAlmostEqual(evaluation.common_return, 0.0)
+        self.assertIsNone(evaluation.residual_return)
+        self.assertAlmostEqual(evaluation.realized_return, 0.0200)
+
 
 if __name__ == "__main__":
     unittest.main()

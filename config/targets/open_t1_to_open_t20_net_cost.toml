@@ -1,0 +1,11 @@
+id = "open_t1_to_open_t20_net_cost"
+name = "Next-Day Open To 20-Day Open Net Return Cost"
+description = "Interim research target for medium-horizon A-share sleeves using a next-day-open entry and a 20-trading-day holding horizon, net of cash-equity costs but without common-return removal."
+horizon_days = 20
+signal_observation = "trade_date_close"
+trade_entry = "next_day_open"
+trade_exit = "open_on_horizon"
+return_basis = "open_to_open"
+cost_model = "base_a_share_cash"
+label_kind = "net_return"
+eligibility = ["not_suspended", "not_limit_locked", "liquidity_pass"]

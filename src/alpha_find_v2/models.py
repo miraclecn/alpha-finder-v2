@@ -166,6 +166,7 @@ class ResidualTarget:
     trade_exit: str
     return_basis: str
     cost_model: str
+    label_kind: str = "residual_net_return"
     risk_model_id: str = ""
     residualization: list[str] = field(default_factory=list)
     eligibility: list[str] = field(default_factory=list)
@@ -182,6 +183,7 @@ class ResidualTarget:
             trade_exit=str(data["trade_exit"]),
             return_basis=str(data["return_basis"]),
             cost_model=str(data["cost_model"]),
+            label_kind=str(data.get("label_kind", "residual_net_return")),
             risk_model_id=str(data.get("risk_model_id", "")),
             residualization=list(data.get("residualization", [])),
             eligibility=list(data.get("eligibility", [])),

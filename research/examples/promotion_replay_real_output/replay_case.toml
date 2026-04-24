@@ -1,0 +1,25 @@
+schema_version = 1
+artifact_type = "portfolio_promotion_replay_case"
+case_id = "trend_real_output_weekly_replay"
+description = "Replay a baseline trend-only weekly book against a proposed trend-plus-resilience weekly book using generated output artifacts on the honest 2025-08-29+ decision calendar."
+baseline_portfolio_path = "research/examples/promotion_replay_real_output/baseline_portfolio.toml"
+candidate_portfolio_path = "research/examples/promotion_replay_real_output/candidate_portfolio.toml"
+default_cost_model_path = "config/cost_models/base_a_share_cash.toml"
+additional_cost_model_paths = [
+  "config/cost_models/high_a_share_cash.toml",
+]
+benchmark_state_path = "output/csi800_benchmark_state_history.json"
+artifact_paths = [
+  "output/trend_leadership_core_artifact.json",
+  "output/trend_resilience_core_artifact.json",
+]
+periods_per_year = 52
+max_component_correlation = 0.60
+correlation_to_existing_portfolio = 0.55
+turnover_budget = 0.55
+
+[cost_scenario_pass]
+base = true
+
+[regime_pass]
+bull = true

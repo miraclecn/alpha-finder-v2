@@ -1,0 +1,8 @@
+schema_version = 1
+artifact_type = "sleeve_artifact_build_case"
+
+case_id = "trend_leadership_core_output_build"
+description = "Build the trend-leadership sleeve artifact directly from the generated output/trend_leadership_core_input.json observation input."
+sleeve_path = "config/sleeves/trend_leadership_core.toml"
+input_path = "output/trend_leadership_core_input.json"
+output_path = "output/trend_leadership_core_artifact.json"
