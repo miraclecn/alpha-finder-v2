@@ -79,6 +79,11 @@ tables remain honest.
 
 ## Quick Start
 
+Local source-data packets are intentionally not versioned. Keep official
+provider files such as the Shenwan Excel/PDF exports under `docs/data/` on the
+local machine; git tracks the audit notes and code paths, not the binary data
+payloads.
+
 ```bash
 cd /home/nan/alpha-find-v2
 python3 -m venv .venv

@@ -6,3 +6,6 @@ __pycache__/
 build/
 dist/
 output/
+docs/data/*.xls
+docs/data/*.xlsx
+docs/data/*.pdf
