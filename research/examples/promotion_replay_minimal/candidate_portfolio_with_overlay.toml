@@ -1,0 +1,21 @@
+id = "research_example_candidate_portfolio_with_overlay"
+name = "Research Example Candidate Portfolio With Overlay"
+mandate_id = "a_share_long_only_eod"
+benchmark = "CSI 800"
+rebalance_policy = "weekly"
+description = "Candidate example portfolio that binds the formal regime overlay to the same-target synthetic satellite sleeve."
+construction_model_id = "a_share_core_blend"
+promotion_gate_id = "research_example_replay_gate"
+regime_overlay_id = "a_share_risk_overlay"
+execution_policy_id = "a_share_next_open_v1"
+decay_monitor_id = "a_share_core_watch"
+sleeves = ["fundamental_rerating_core", "fundamental_rerating_satellite"]
+
+[allocation]
+fundamental_rerating_core = 0.30
+fundamental_rerating_satellite = 0.70
+
+[constraints]
+max_names = 5
+max_single_name_weight = 0.60
+max_industry_overweight = 0.30

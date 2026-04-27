@@ -126,16 +126,31 @@ Note:
 - `build-reference-staging-db` now stages official `index_weight` snapshots and
   SW2021 `index_member_all` history so the checked-in CSI 800 benchmark case can
   run with `provider_weight` and `sw2021_l1`.
+- `output/pit_reference_staging.duckdb` now records its staged PIT truth in
+  `reference_dataset_registry`, while `output/research_source.duckdb` records
+  the release-1 boundary contract in `data_spine_registry`,
+  `build_chain_registry`, and `data_boundary_registry`.
 - `research/examples/trend_input_build_minimal/trend_leadership_core.toml` now
   enables `cn_a_directional_open_lock`, so generated trend artifacts stop
   silently suppressing A-share open-limit trade blocks.
-- The current honest CSI 800 + `sw2021_l1` replay window begins on `2025-08-29`
-  because earlier benchmark constituents still have missing staged SW2021
-  classification coverage.
-- The real-output promotion replay lane now compares generated
-  `trend_leadership_core` and `trend_resilience_core` artifacts on that same
-  `2025-08-29+` weekly calendar instead of falling back to a synthetic second
-  sleeve artifact.
+- Revalidated on `2026-04-27`, the staged CSI 800 + `sw2021_l1` benchmark
+  constituent coverage now spans `2014-02-21` through `2026-04-23`.
+  `output/audits/sw_industry_pit_audit_20140221_20260423.json` reports
+  `2,364,800 / 2,364,800` staged constituent-days covered on both exclusive
+  and inclusive interval semantics.
+- A temporary full-window benchmark-state build over `2014-02-21` through
+  `2026-04-23` also succeeds with `2,956` trading steps and `800`
+  constituents per step, so the benchmark-state layer is no longer the
+  live-readiness history blocker.
+- The checked-in trend live-candidate chain now rebuilds on the widened
+  `2021-03-05` through `2026-04-23` input calendar. The replay validation window
+  ends at `2026-03-19` because the sleeve target exits at T+20, and the
+  multi-year audit covers `5.0404` calendar years with no blockers.
+- Beijing-board names are excluded from the live-tradable trend input.
+  `302132.SZ` is resolved through a narrow `security_code_alias_backfill` from
+  legacy `300114.SZ` industry intervals. `chinext` and `star` names remain in
+  the default universe; their `20%` price-limit regime is handled through
+  tradeability, cost, liquidity, concentration, and exposure controls.
 - `run-promotion-replay` now emits replay diagnostics for sleeve overlap,
   candidate-only contribution, concentration, and the best/worst incremental
   periods so portfolio tuning can be guided by economic evidence.

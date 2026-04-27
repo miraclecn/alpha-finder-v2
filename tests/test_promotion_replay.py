@@ -6,6 +6,7 @@ from alpha_find_v2.models import (
     PortfolioConstructionModel,
     PortfolioRecipe,
     PromotionGate,
+    RegimeOverlay,
 )
 from alpha_find_v2.portfolio_promotion_replay import (
     PortfolioPromotionReplay,
@@ -15,6 +16,7 @@ from alpha_find_v2.portfolio_promotion_replay import (
     SleeveResearchStep,
     SleeveSignalRecord,
 )
+from alpha_find_v2.regime_overlay import RegimeOverlayObservationStep
 
 
 class PortfolioPromotionReplayTest(unittest.TestCase):
@@ -286,6 +288,109 @@ class PortfolioPromotionReplayTest(unittest.TestCase):
             min(candidate_breadths),
         )
 
+    def test_replay_applies_overlay_exposure_to_candidate_weights_and_walk_forward(self) -> None:
+        plain_input = PortfolioPromotionReplayInput(
+            baseline_portfolio=self._baseline_portfolio(),
+            candidate_portfolio=self._candidate_portfolio_with_overlay(),
+            artifacts=[self._slow_artifact(), self._event_artifact()],
+            periods_per_year=52,
+            benchmark_industry_weights_by_date=self._benchmark_industry_weights(),
+            cost_scenario_pass={"base": True},
+            regime_pass={"bull": True},
+            max_component_correlation=0.35,
+            correlation_to_existing_portfolio=0.25,
+            walk_forward_splits=[
+                ReplayWalkForwardSplitDefinition(
+                    split_id="full_window",
+                    start_trade_date="2026-04-06",
+                ),
+                ReplayWalkForwardSplitDefinition(
+                    split_id="late_entry",
+                    start_trade_date="2026-04-13",
+                ),
+            ],
+        )
+        overlay_input = PortfolioPromotionReplayInput(
+            baseline_portfolio=self._baseline_portfolio(),
+            candidate_portfolio=self._candidate_portfolio_with_overlay(),
+            artifacts=[self._slow_artifact(), self._event_artifact()],
+            regime_overlay=self._regime_overlay(),
+            regime_overlay_observations=self._regime_overlay_observations(),
+            periods_per_year=52,
+            benchmark_industry_weights_by_date=self._benchmark_industry_weights(),
+            cost_scenario_pass={"base": True},
+            regime_pass={"bull": True},
+            max_component_correlation=0.35,
+            correlation_to_existing_portfolio=0.25,
+            walk_forward_splits=[
+                ReplayWalkForwardSplitDefinition(
+                    split_id="full_window",
+                    start_trade_date="2026-04-06",
+                ),
+                ReplayWalkForwardSplitDefinition(
+                    split_id="late_entry",
+                    start_trade_date="2026-04-13",
+                ),
+            ],
+        )
+
+        plain_result = self.replay.replay(plain_input)
+        overlay_result = self.replay.replay(overlay_input)
+
+        self.assertIsNotNone(overlay_result.regime_overlay)
+        assert overlay_result.regime_overlay is not None
+        self.assertEqual(
+            [decision.state for decision in overlay_result.regime_overlay.decisions],
+            ["normal", "de_risk", "cash_heavier"],
+        )
+        self.assertEqual(
+            overlay_result.regime_overlay.summary.de_risk_periods,
+            1,
+        )
+        self.assertEqual(
+            overlay_result.regime_overlay.summary.cash_heavier_periods,
+            1,
+        )
+
+        plain_weight_sums = [
+            sum(step.executed_weights.values())
+            for step in plain_result.candidate_simulation.steps
+        ]
+        candidate_weight_sums = [
+            sum(step.executed_weights.values())
+            for step in overlay_result.candidate_simulation.steps
+        ]
+        expected_overlay_weight_sums = [
+            plain_weight_sums[0] * 1.0,
+            plain_weight_sums[1] * 0.65,
+            plain_weight_sums[2] * 0.35,
+        ]
+        expected_overlay_cash_weights = [
+            1.0 - expected_overlay_weight_sums[0],
+            1.0 - expected_overlay_weight_sums[1],
+            1.0 - expected_overlay_weight_sums[2],
+        ]
+        for actual, expected in zip(candidate_weight_sums, expected_overlay_weight_sums):
+            self.assertAlmostEqual(actual, expected)
+        for step, expected_cash_weight in zip(
+            overlay_result.candidate_construction.steps,
+            expected_overlay_cash_weights,
+        ):
+            self.assertAlmostEqual(step.cash_weight, expected_cash_weight)
+        self.assertLess(
+            overlay_result.candidate_summary.average_return,
+            plain_result.candidate_summary.average_return,
+        )
+
+        self.assertIsNotNone(overlay_result.walk_forward)
+        self.assertIsNotNone(plain_result.walk_forward)
+        assert overlay_result.walk_forward is not None
+        assert plain_result.walk_forward is not None
+        self.assertLess(
+            overlay_result.walk_forward.splits[1].candidate_summary.average_return,
+            plain_result.walk_forward.splits[1].candidate_summary.average_return,
+        )
+
     def test_replay_reports_regime_buckets_and_weak_subperiods(self) -> None:
         replay_input = PortfolioPromotionReplayInput(
             baseline_portfolio=self._baseline_portfolio(),
@@ -389,6 +494,11 @@ class PortfolioPromotionReplayTest(unittest.TestCase):
                 "max_industry_overweight": 0.30,
             },
         )
+
+    def _candidate_portfolio_with_overlay(self) -> PortfolioRecipe:
+        portfolio = self._candidate_portfolio()
+        portfolio.regime_overlay_id = "test_overlay"
+        return portfolio
 
     def _slow_artifact(self) -> SleeveResearchArtifact:
         return SleeveResearchArtifact(
@@ -536,6 +646,55 @@ class PortfolioPromotionReplayTest(unittest.TestCase):
             "2026-05-18": {"bank": 0.35, "tech": 0.35, "industrial": 0.30},
             "2026-05-25": {"bank": 0.35, "tech": 0.35, "industrial": 0.30},
         }
+
+    def _regime_overlay(self) -> RegimeOverlay:
+        return RegimeOverlay(
+            id="test_overlay",
+            name="Test Overlay",
+            mandate_id="test_mandate",
+            benchmark="CSI 800",
+            description="Replay overlay for testing.",
+            required_inputs=[
+                "benchmark_trend",
+                "market_breadth",
+                "dispersion",
+            ],
+            stop_inputs=[],
+            allowed_states=["normal", "de_risk", "cash_heavier"],
+            de_risk_min_risk_off=1,
+            cash_heavier_min_risk_off=3,
+            normal_gross_exposure=1.0,
+            de_risk_gross_exposure=0.65,
+            cash_heavier_gross_exposure=0.35,
+        )
+
+    def _regime_overlay_observations(self) -> list[RegimeOverlayObservationStep]:
+        return [
+            RegimeOverlayObservationStep(
+                trade_date="2026-04-06",
+                input_states={
+                    "benchmark_trend": "supportive",
+                    "market_breadth": "neutral",
+                    "dispersion": "neutral",
+                },
+            ),
+            RegimeOverlayObservationStep(
+                trade_date="2026-04-13",
+                input_states={
+                    "benchmark_trend": "risk_off",
+                    "market_breadth": "neutral",
+                    "dispersion": "neutral",
+                },
+            ),
+            RegimeOverlayObservationStep(
+                trade_date="2026-04-20",
+                input_states={
+                    "benchmark_trend": "risk_off",
+                    "market_breadth": "risk_off",
+                    "dispersion": "risk_off",
+                },
+            ),
+        ]
 
     def _record(
         self,

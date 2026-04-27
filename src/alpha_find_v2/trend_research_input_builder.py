@@ -30,6 +30,10 @@ SUPPORTED_LIMIT_LOCK_MODES = {
     "disabled",
     "cn_a_directional_open_lock",
 }
+SUPPORTED_RESIDUALIZATION_MODES = {
+    "non_residual_target",
+    "audited_residual_components",
+}
 
 
 @dataclass(slots=True)
@@ -39,6 +43,7 @@ class TrendResearchInputBuildCaseDefinition:
     sleeve_path: str
     source_db_path: str
     output_path: str
+    residual_component_snapshot_path: str = ""
     start_date: str = ""
     end_date: str = ""
     min_listing_days: int = 120
@@ -50,6 +55,7 @@ class TrendResearchInputBuildCaseDefinition:
     industry_schema: str = ""
     limit_lock_mode: str = "disabled"
     residualization_mode: str = "non_residual_target"
+    exclude_boards: list[str] = field(default_factory=list)
 
     @classmethod
     def from_toml(cls, data: dict[str, object]) -> "TrendResearchInputBuildCaseDefinition":
@@ -70,6 +76,9 @@ class TrendResearchInputBuildCaseDefinition:
             sleeve_path=str(data["sleeve_path"]),
             source_db_path=str(data["source_db_path"]),
             output_path=str(data["output_path"]),
+            residual_component_snapshot_path=str(
+                data.get("residual_component_snapshot_path", "")
+            ),
             start_date=str(data.get("start_date", "")),
             end_date=str(data.get("end_date", "")),
             min_listing_days=int(data.get("min_listing_days", 120)),
@@ -81,6 +90,11 @@ class TrendResearchInputBuildCaseDefinition:
             industry_schema=str(data.get("industry_schema", "")),
             limit_lock_mode=str(data.get("limit_lock_mode", "disabled")),
             residualization_mode=str(data.get("residualization_mode", "non_residual_target")),
+            exclude_boards=[
+                str(board).strip()
+                for board in data.get("exclude_boards", [])
+                if str(board).strip()
+            ],
         )
 
 
@@ -89,6 +103,8 @@ class LoadedTrendResearchInputBuildCase:
     definition: TrendResearchInputBuildCaseDefinition
     sleeve_id: str
     descriptor_set_id: str
+    target_id: str
+    risk_model_id: str
     source_db_path: Path
     output_path: str
     holding_count: int
@@ -96,6 +112,7 @@ class LoadedTrendResearchInputBuildCase:
     min_turnover_cny_mn: float
     descriptor_weights: dict[str, float]
     residual_components: list[str] = field(default_factory=list)
+    residual_component_snapshot_path: Path | None = None
 
 
 @dataclass(slots=True)
@@ -164,9 +181,11 @@ def load_trend_research_input_build_case(
             "Trend research input builder currently supports only "
             "limit_lock_mode in {'disabled', 'cn_a_directional_open_lock'}."
         )
-    if definition.residualization_mode != "non_residual_target":
+    if definition.residualization_mode not in SUPPORTED_RESIDUALIZATION_MODES:
+        supported_modes = "', '".join(sorted(SUPPORTED_RESIDUALIZATION_MODES))
         raise ValueError(
-            "Trend research input builder currently supports only residualization_mode='non_residual_target'."
+            "Trend research input builder currently supports only "
+            f"residualization_mode in {{'{supported_modes}'}}."
         )
 
     sleeve = load_sleeve(definition.sleeve_path)
@@ -176,10 +195,22 @@ def load_trend_research_input_build_case(
         CONFIG_ROOT / "descriptor_sets" / f"{sleeve.descriptor_set_id}.toml"
     )
     target = load_target(CONFIG_ROOT / "targets" / f"{sleeve.target_id}.toml")
-    if target.label_kind != "net_return" or target.residualization or target.risk_model_id:
+    if definition.residualization_mode == "non_residual_target" and (
+        target.label_kind != "net_return" or target.residualization or target.risk_model_id
+    ):
         raise ValueError(
             "Trend research input builder requires an explicit non-residual target; wire audited residualization before binding a residual target."
         )
+    if definition.residualization_mode == "audited_residual_components":
+        if not target.residualization:
+            raise ValueError(
+                "Trend research input build case residualization_mode='audited_residual_components' requires a residual target."
+            )
+        if not definition.residual_component_snapshot_path.strip():
+            raise ValueError(
+                "Trend research input build case requires residual_component_snapshot_path "
+                "for residual targets."
+            )
     default_cost_model = load_cost_model(CONFIG_ROOT / "cost_models" / f"{target.cost_model}.toml")
 
     holding_count = int(sleeve.construction.get("holding_count", 0))
@@ -193,6 +224,8 @@ def load_trend_research_input_build_case(
         definition=definition,
         sleeve_id=sleeve.id,
         descriptor_set_id=descriptor_set.id,
+        target_id=target.id,
+        risk_model_id=target.risk_model_id,
         source_db_path=_resolve_project_path(definition.source_db_path),
         output_path=definition.output_path,
         holding_count=holding_count,
@@ -200,6 +233,11 @@ def load_trend_research_input_build_case(
         min_turnover_cny_mn=min_turnover_cny_mn,
         descriptor_weights=descriptor_weights,
         residual_components=list(target.residualization),
+        residual_component_snapshot_path=(
+            _resolve_project_path(definition.residual_component_snapshot_path)
+            if definition.residual_component_snapshot_path.strip()
+            else None
+        ),
     )
 
 
@@ -229,12 +267,10 @@ def build_trend_research_observation_input(
         min_listing_days=loaded_case.definition.min_listing_days,
         rebalance_dates=set(rebalance_dates),
         limit_lock_mode=loaded_case.definition.limit_lock_mode,
+        exclude_boards=set(loaded_case.definition.exclude_boards),
     )
 
     steps: list[SleeveResearchObservationStep] = []
-    residual_components = {
-        component: 0.0 for component in loaded_case.residual_components
-    }
     selected_by_date: list[tuple[str, list[dict[str, object]]]] = []
     for trade_date in rebalance_dates:
         date_candidates = [candidate for candidate in candidates if candidate.trade_date == trade_date]
@@ -254,6 +290,23 @@ def build_trend_research_observation_input(
     if not selected_by_date:
         raise ValueError(
             f"Trend research input build case {loaded_case.definition.case_id} produced no eligible steps."
+        )
+
+    residual_components_by_observation: dict[tuple[str, str], dict[str, float]] = {}
+    if loaded_case.residual_components:
+        # Reuse the same audited residual snapshot contract as the slower fundamental lane.
+        from .fundamental_research_input_builder import _load_residual_component_snapshot
+
+        residual_components_by_observation = _load_residual_component_snapshot(
+            path=loaded_case.residual_component_snapshot_path,
+            target_id=loaded_case.target_id,
+            risk_model_id=loaded_case.risk_model_id,
+            requested_observations=[
+                (trade_date, str(item["candidate"].security_id))
+                for trade_date, selected in selected_by_date
+                for item in selected
+            ],
+            required_components=loaded_case.residual_components,
         )
 
     industry_by_observation = _load_industry_labels(
@@ -291,7 +344,10 @@ def build_trend_research_observation_input(
                     liquidity_pass=item["candidate"].exit_liquidity_pass,
                     limit_locked=item["candidate"].exit_limit_locked,
                 ),
-                residual_components=dict(residual_components),
+                residual_components=residual_components_by_observation.get(
+                    (trade_date, item["candidate"].security_id),
+                    {},
+                ),
             )
             for rank, item in enumerate(selected, start=1)
         ]
@@ -398,17 +454,16 @@ def _load_industry_labels(
                     pit.industry_code,
                     row_number() OVER (
                         PARTITION BY requested.trade_date, requested.security_id
-                        ORDER BY {_date_key_sql('pit.effective_at')} DESC NULLS LAST
+                        ORDER BY {_timestamp_sql('pit.effective_at')} DESC NULLS LAST
                     ) AS row_number
                 FROM requested
                 LEFT JOIN industry_classification_pit AS pit
                     ON pit.security_id = requested.security_id
                    AND pit.industry_schema = ?
-                   AND {_date_key_sql('pit.effective_at')} <= requested.trade_date
+                   AND {_timestamp_sql('pit.effective_at')} <= strptime(requested.trade_date, '%Y%m%d')
                    AND (
-                       pit.removed_at IS NULL
-                       OR pit.removed_at = ''
-                       OR {_date_key_sql('pit.removed_at')} > requested.trade_date
+                       {_timestamp_sql('pit.removed_at')} IS NULL
+                       OR {_timestamp_sql('pit.removed_at')} > strptime(requested.trade_date, '%Y%m%d')
                    )
             )
             SELECT trade_date, security_id, industry_code
@@ -457,12 +512,15 @@ def _load_table_columns(source_db_path: Path, table_name: str) -> set[str]:
     return {str(row[1]) for row in rows}
 
 
-def _date_key_sql(expression: str) -> str:
-    return (
-        "substr(regexp_replace(COALESCE("
-        f"{expression}"
-        ", ''), '[^0-9]', '', 'g'), 1, 8)"
-    )
+def _timestamp_sql(expression: str) -> str:
+    return f"""
+        CASE
+            WHEN {expression} IS NULL OR trim(CAST({expression} AS VARCHAR)) = '' THEN NULL
+            WHEN length(trim(CAST({expression} AS VARCHAR))) = 8
+                THEN strptime(trim(CAST({expression} AS VARCHAR)), '%Y%m%d')
+            ELSE CAST({expression} AS TIMESTAMP)
+        END
+    """
 
 
 def _build_warnings(industry_label_source: str, limit_lock_mode: str) -> list[str]:
@@ -522,6 +580,7 @@ def _load_candidate_rows(
     min_listing_days: int,
     rebalance_dates: set[str],
     limit_lock_mode: str,
+    exclude_boards: set[str],
 ) -> list[_CandidateRow]:
     import duckdb
 
@@ -630,6 +689,8 @@ def _load_candidate_rows(
         ) = row
         trade_date = str(trade_date)
         if trade_date not in rebalance_dates:
+            continue
+        if str(board) in exclude_boards:
             continue
         if bool(is_st):
             continue

@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "artifact_type": "regime_overlay_observation_history",
+  "overlay_id": "a_share_risk_overlay",
+  "steps": [
+    {
+      "trade_date": "20260305",
+      "input_states": {
+        "benchmark_trend": "supportive",
+        "market_breadth": "supportive",
+        "dispersion": "neutral",
+        "realized_volatility": "neutral",
+        "price_limit_stress": "neutral"
+      }
+    },
+    {
+      "trade_date": "20260312",
+      "input_states": {
+        "benchmark_trend": "risk_off",
+        "market_breadth": "supportive",
+        "dispersion": "neutral",
+        "realized_volatility": "neutral",
+        "price_limit_stress": "neutral"
+      }
+    },
+    {
+      "trade_date": "20260319",
+      "input_states": {
+        "benchmark_trend": "risk_off",
+        "market_breadth": "risk_off",
+        "dispersion": "risk_off",
+        "realized_volatility": "neutral",
+        "price_limit_stress": "neutral"
+      }
+    }
+  ]
+}

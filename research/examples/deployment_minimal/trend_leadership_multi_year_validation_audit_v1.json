@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "artifact_type": "multi_year_validation_audit",
+  "candidate_id": "trend_leadership_shadow_live_v1",
+  "as_of_date": "2026-04-27",
+  "validation_window_start": "2021-03-05",
+  "validation_window_end": "2026-03-19",
+  "minimum_calendar_years": 5.0,
+  "benchmark_membership_pit": true,
+  "industry_classification_pit": true,
+  "anchored_walk_forward_complete": true,
+  "regime_split_complete": true,
+  "portfolio_evidence_complete": true,
+  "tradeability": {
+    "t_plus_one": true,
+    "suspension": true,
+    "price_limits": true,
+    "lot_size": true,
+    "liquidity": true,
+    "slippage": true
+  },
+  "market_state_coverage": {
+    "drawdown": true,
+    "rebound": true,
+    "broad_trend": true,
+    "fragile_leadership": true
+  },
+  "notes": [
+    "As of 2026-04-27, CSI 800 + sw2021_l1 benchmark constituent coverage is verified from 2014-02-21 through 2026-04-23.",
+    "Beijing-board names are excluded from the live-tradable trend input.",
+    "The 302132.SZ current-code history is resolved through a manual security_code_alias_backfill from legacy 300114.SZ industry intervals."
+  ]
+}

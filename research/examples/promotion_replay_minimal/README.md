@@ -13,6 +13,12 @@ Files:
 - `baseline_portfolio.toml`: baseline production book before sleeve admission
 - `candidate_portfolio.toml`: proposed book after sleeve admission
 - `replay_case.toml`: scenario binding for replay
+- `candidate_portfolio_with_overlay.toml`: candidate replay portfolio that also
+  declares `regime_overlay_id`
+- `replay_case_with_overlay.toml`: replay case that binds explicit overlay
+  observations
+- `regime_overlay_observations.json`: minimal green-input state history used by
+  the formal overlay evaluator
 - `benchmark_state_history.json`: PIT benchmark history used by the constructor, including per-date industry weights and constituent context
 - `sleeve_artifacts/*.json`: decision-calendar research artifacts for each sleeve
 
@@ -32,9 +38,15 @@ Run:
 
 ```bash
 cd /home/nan/alpha-find-v2
-PYTHONPATH=src python -m alpha_find_v2 run-promotion-replay --case research/examples/promotion_replay_minimal/replay_case.toml
+PYTHONPATH=src python3 -m alpha_find_v2 run-promotion-replay --case research/examples/promotion_replay_minimal/replay_case.toml
+PYTHONPATH=src python3 -m alpha_find_v2 run-promotion-replay --case research/examples/promotion_replay_minimal/replay_case_with_overlay.toml
 ```
 
 The example uses a narrow research-only promotion gate and an explicit turnover budget.
 That is intentional.
 Its purpose is to prove the persisted replay spine, not to stand in for the final production gate.
+The overlay variant is also intentionally minimal.
+It does not derive new market signals from partial artifacts.
+It only proves that V2 can load a first-class `regime_overlay`, map explicit
+green-input states into `normal / de_risk / cash_heavier`, and fail promotion
+when overlay inputs are incomplete.

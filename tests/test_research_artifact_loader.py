@@ -111,6 +111,30 @@ class ResearchArtifactLoaderTest(unittest.TestCase):
         self.assertGreater(result.marginal.marginal_ir_delta, 0.0)
         self.assertIsNotNone(result.regime_breakdown)
 
+    def test_replay_case_can_bind_regime_overlay_evidence(self) -> None:
+        loaded_case = load_portfolio_promotion_replay_case(
+            EXAMPLE_ROOT / "replay_case_with_overlay.toml"
+        )
+
+        replay = PortfolioPromotionReplay(
+            mandate=loaded_case.mandate,
+            construction_model=loaded_case.construction_model,
+            default_cost_model=loaded_case.default_cost_model,
+            gate=loaded_case.gate,
+            cost_models=loaded_case.cost_models,
+        )
+        result = replay.replay(loaded_case.replay_input)
+
+        self.assertIsNotNone(loaded_case.regime_overlay)
+        self.assertIsNotNone(result.regime_overlay)
+        assert result.regime_overlay is not None
+        self.assertEqual(
+            [decision.state for decision in result.regime_overlay.decisions],
+            ["normal", "de_risk", "cash_heavier"],
+        )
+        self.assertEqual(result.regime_overlay.summary.blocked_periods, 0)
+        self.assertIn("regime_overlay_complete", result.decision.passed_checks)
+
     def test_cli_run_promotion_replay_separates_research_evidence_from_gate_output(self) -> None:
         result = subprocess.run(
             [
@@ -141,6 +165,7 @@ class ResearchArtifactLoaderTest(unittest.TestCase):
                 "diagnostics",
                 "marginal",
                 "regime_breakdown",
+                "regime_overlay",
                 "walk_forward",
             ],
         )

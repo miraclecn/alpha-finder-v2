@@ -541,6 +541,101 @@ class MarketDataBootstrapTest(unittest.TestCase):
             )
             conn.close()
 
+    def test_build_research_source_db_writes_phase1_boundary_registries(self) -> None:
+        from alpha_find_v2.market_data_bootstrap import build_research_source_db
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            source_db = temp_root / "source.duckdb"
+            supplemental_db = temp_root / "supplemental.duckdb"
+            target_db = temp_root / "target.duckdb"
+            _create_source_db(source_db)
+            _create_supplemental_pit_db(supplemental_db)
+
+            build_research_source_db(
+                source_db,
+                target_db,
+                supplemental_db=supplemental_db,
+            )
+
+            conn = duckdb.connect(str(target_db), read_only=True)
+            spine_rows = conn.execute(
+                """
+                SELECT surface_id, provider, boundary_role, path
+                FROM data_spine_registry
+                ORDER BY surface_id
+                """
+            ).fetchall()
+            self.assertEqual(
+                spine_rows,
+                [
+                    (
+                        "source_market_db",
+                        "audited_v1_tushare_market_source",
+                        "external_source",
+                        str(source_db.resolve()),
+                    ),
+                    (
+                        "supplemental_reference_db",
+                        "tushare_reference_staging",
+                        "pit_reference_staging",
+                        str(supplemental_db.resolve()),
+                    ),
+                    (
+                        "target_research_db",
+                        "v2_isolated_research_db",
+                        "isolated_v2_research_surface",
+                        str(target_db.resolve()),
+                    ),
+                ],
+            )
+            build_chain_rows = conn.execute(
+                """
+                SELECT step_order, command_id, boundary_role
+                FROM build_chain_registry
+                ORDER BY step_order
+                """
+            ).fetchall()
+            self.assertEqual(
+                build_chain_rows,
+                [
+                    (1, "build-reference-staging-db", "required_entrypoint"),
+                    (2, "build-research-source-db", "required_entrypoint"),
+                    (3, "build-benchmark-state", "required_entrypoint"),
+                ],
+            )
+            boundary_rows = conn.execute(
+                """
+                SELECT category, entry_id, decision
+                FROM data_boundary_registry
+                WHERE (category, entry_id) IN (
+                    ('allowed_reuse', 'daily_bar_pit'),
+                    ('allowed_reuse', 'benchmark_membership_pit'),
+                    ('forbidden_reuse', 'v1_factor_outputs'),
+                    ('known_gap', 'exact_limit_state_reconstruction'),
+                    ('audit_rule', 'akshare_field_requires_explicit_v2_audit'),
+                    ('failure_condition', 'akshare_unaudited_in_production_path')
+                )
+                ORDER BY category, entry_id
+                """
+            ).fetchall()
+            self.assertEqual(
+                boundary_rows,
+                [
+                    ("allowed_reuse", "benchmark_membership_pit", "allow"),
+                    ("allowed_reuse", "daily_bar_pit", "allow"),
+                    ("audit_rule", "akshare_field_requires_explicit_v2_audit", "required"),
+                    (
+                        "failure_condition",
+                        "akshare_unaudited_in_production_path",
+                        "stop",
+                    ),
+                    ("forbidden_reuse", "v1_factor_outputs", "forbid"),
+                    ("known_gap", "exact_limit_state_reconstruction", "visible_gap"),
+                ],
+            )
+            conn.close()
+
     def test_cli_build_research_source_db_writes_target_database(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)

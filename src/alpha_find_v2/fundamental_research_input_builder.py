@@ -22,6 +22,7 @@ from .trend_research_input_builder import (
     _read_toml,
     _resolve_project_path,
     _resolve_trade_leg_open,
+    _timestamp_sql,
     _trade_leg_fallback_price,
     write_trend_research_observation_input,
 )
@@ -99,6 +100,7 @@ class LoadedFundamentalResearchInputBuildCase:
     sleeve_id: str
     descriptor_set_id: str
     target_id: str
+    risk_model_id: str
     source_db_path: Path
     output_path: str
     holding_count: int
@@ -118,6 +120,18 @@ class FundamentalResearchObservationBuildResult:
     source_db_path: str
     observation_input: SleeveResearchObservationInput
     warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class ValidatedResidualComponentSnapshot:
+    path: str
+    target_id: str
+    risk_model_id: str
+    required_components: list[str]
+    step_count: int
+    record_count: int
+    provenance: dict[str, str]
+    components_by_observation: dict[tuple[str, str], dict[str, float]]
 
 
 @dataclass(slots=True)
@@ -200,6 +214,7 @@ def load_fundamental_research_input_build_case(
         sleeve_id=sleeve.id,
         descriptor_set_id=descriptor_set.id,
         target_id=target.id,
+        risk_model_id=target.risk_model_id,
         source_db_path=_resolve_project_path(definition.source_db_path),
         output_path=definition.output_path,
         holding_count=holding_count,
@@ -273,6 +288,7 @@ def build_fundamental_research_observation_input(
         residual_components_by_observation = _load_residual_component_snapshot(
             path=loaded_case.residual_component_snapshot_path,
             target_id=loaded_case.target_id,
+            risk_model_id=loaded_case.risk_model_id,
             requested_observations=[
                 (trade_date, str(item["candidate"].security_id))
                 for trade_date, selected in selected_by_date
@@ -351,7 +367,7 @@ def _load_candidate_rows(
     conn = duckdb.connect(str(source_db_path), read_only=True)
     try:
         rows = conn.execute(
-            """
+            f"""
             WITH history AS (
                 SELECT
                     d.security_id,
@@ -427,11 +443,10 @@ def _load_candidate_rows(
             LEFT JOIN industry_classification_pit AS industry
                 ON industry.security_id = ranked.security_id
                AND industry.industry_schema = ?
-               AND substr(regexp_replace(COALESCE(industry.effective_at, ''), '[^0-9]', '', 'g'), 1, 8) <= ranked.trade_date
+               AND {_timestamp_sql('industry.effective_at')} <= strptime(ranked.trade_date, '%Y%m%d')
                AND (
-                    industry.removed_at IS NULL
-                    OR industry.removed_at = ''
-                    OR substr(regexp_replace(COALESCE(industry.removed_at, ''), '[^0-9]', '', 'g'), 1, 8) > ranked.trade_date
+                    {_timestamp_sql('industry.removed_at')} IS NULL
+                    OR {_timestamp_sql('industry.removed_at')} > strptime(ranked.trade_date, '%Y%m%d')
                )
             WHERE ranked.fundamental_row_number = 1
             ORDER BY ranked.trade_date, ranked.security_id
@@ -693,41 +708,18 @@ def _load_residual_component_snapshot(
     *,
     path: Path | None,
     target_id: str,
+    risk_model_id: str,
     requested_observations: list[tuple[str, str]],
     required_components: list[str],
 ) -> dict[tuple[str, str], dict[str, float]]:
-    if path is None:
-        raise ValueError(
-            "Fundamental research input build case requires residual_component_snapshot_path "
-            "for residual targets."
-        )
+    validated_snapshot = validate_residual_component_snapshot_intake(
+        path=path,
+        target_id=target_id,
+        risk_model_id=risk_model_id,
+        required_components=required_components,
+    )
 
-    payload = _read_json(path)
-    schema_version = int(payload.get("schema_version", 0))
-    if schema_version != 1:
-        raise ValueError(
-            "Unsupported residual component snapshot schema version: "
-            f"{schema_version}"
-        )
-    artifact_type = str(payload.get("artifact_type", ""))
-    if artifact_type != "residual_component_snapshot":
-        raise ValueError(
-            f"Unsupported residual component snapshot type: {artifact_type}"
-        )
-    snapshot_target_id = str(payload.get("target_id", ""))
-    if snapshot_target_id and snapshot_target_id != target_id:
-        raise ValueError(
-            "Residual component snapshot target_id does not match build case target_id."
-        )
-
-    snapshot_by_observation: dict[tuple[str, str], dict[str, float]] = {}
-    for step in payload.get("steps", []):
-        trade_date = str(step["trade_date"])
-        for record in step.get("records", []):
-            snapshot_by_observation[(trade_date, str(record["asset_id"]))] = {
-                str(key): float(value)
-                for key, value in dict(record.get("residual_components", {})).items()
-            }
+    snapshot_by_observation = validated_snapshot.components_by_observation
 
     selected: dict[tuple[str, str], dict[str, float]] = {}
     for trade_date, asset_id in requested_observations:
@@ -750,6 +742,207 @@ def _load_residual_component_snapshot(
             component: float(components[component]) for component in required_components
         }
     return selected
+
+
+def validate_residual_component_snapshot_intake(
+    *,
+    path: Path | str | None,
+    target_id: str,
+    risk_model_id: str,
+    required_components: list[str],
+    required_coverage_path: Path | str | None = None,
+) -> ValidatedResidualComponentSnapshot:
+    if path is None:
+        raise ValueError(
+            "Fundamental research input build case requires residual_component_snapshot_path "
+            "for residual targets."
+        )
+
+    resolved_path = _resolve_project_path(path)
+    if not resolved_path.exists():
+        raise ValueError(f"Residual component snapshot file not found: {resolved_path}")
+    payload = _read_json(resolved_path)
+    schema_version = int(payload.get("schema_version", 0))
+    if schema_version != 1:
+        raise ValueError(
+            "Unsupported residual component snapshot schema version: "
+            f"{schema_version}"
+        )
+    artifact_type = str(payload.get("artifact_type", ""))
+    if artifact_type != "residual_component_snapshot":
+        raise ValueError(
+            f"Unsupported residual component snapshot type: {artifact_type}"
+        )
+
+    snapshot_target_id = str(payload.get("target_id", ""))
+    if snapshot_target_id != target_id:
+        raise ValueError(
+            "Residual component snapshot target_id does not match expected target_id."
+        )
+
+    provenance = _load_residual_component_snapshot_provenance(payload)
+    snapshot_risk_model_id = str(
+        payload.get("risk_model_id", provenance.get("risk_model_id", ""))
+    ).strip()
+    if snapshot_risk_model_id != risk_model_id:
+        raise ValueError(
+            "Residual component snapshot risk_model_id does not match expected risk_model_id."
+        )
+
+    snapshot_by_observation: dict[tuple[str, str], dict[str, float]] = {}
+    step_count = 0
+    record_count = 0
+    for step in payload.get("steps", []):
+        trade_date = str(step.get("trade_date", "")).strip()
+        if not trade_date:
+            raise ValueError("Residual component snapshot step missing trade_date.")
+        step_count += 1
+        for record in step.get("records", []):
+            asset_id = str(record.get("asset_id", "")).strip()
+            if not asset_id:
+                raise ValueError(
+                    f"Residual component snapshot record missing asset_id on {trade_date}."
+                )
+
+            observation_key = (trade_date, asset_id)
+            if observation_key in snapshot_by_observation:
+                raise ValueError(
+                    "Duplicate residual component snapshot observation: "
+                    f"{asset_id} on {trade_date}"
+                )
+
+            components = {
+                str(key): float(value)
+                for key, value in dict(record.get("residual_components", {})).items()
+            }
+            missing_components = [
+                component for component in required_components if component not in components
+            ]
+            if missing_components:
+                joined = ", ".join(sorted(missing_components))
+                raise ValueError(
+                    "Missing residual components for snapshot observation: "
+                    f"{asset_id} on {trade_date}: {joined}"
+                )
+
+            snapshot_by_observation[observation_key] = {
+                component: float(components[component]) for component in required_components
+            }
+            record_count += 1
+
+    if step_count <= 0:
+        raise ValueError("Residual component snapshot must contain at least one step.")
+
+    if required_coverage_path is not None:
+        required_coverage = _load_required_residual_snapshot_coverage(
+            path=required_coverage_path,
+            target_id=target_id,
+        )
+        missing_required_observations = sorted(
+            required_coverage - set(snapshot_by_observation.keys())
+        )
+        if missing_required_observations:
+            preview = ", ".join(
+                f"{asset_id} on {trade_date}"
+                for trade_date, asset_id in missing_required_observations[:5]
+            )
+            raise ValueError(
+                "Residual component snapshot is missing required coverage observations: "
+                + preview
+            )
+
+    return ValidatedResidualComponentSnapshot(
+        path=str(resolved_path),
+        target_id=target_id,
+        risk_model_id=risk_model_id,
+        required_components=list(required_components),
+        step_count=step_count,
+        record_count=record_count,
+        provenance=provenance,
+        components_by_observation=snapshot_by_observation,
+    )
+
+
+def _load_residual_component_snapshot_provenance(
+    payload: dict[str, object],
+) -> dict[str, str]:
+    provenance_payload = payload.get("provenance")
+    if not isinstance(provenance_payload, dict):
+        raise ValueError(
+            "Residual component snapshot must include provenance metadata."
+        )
+
+    required_fields = (
+        "benchmark_definition",
+        "industry_schema",
+        "generation_date",
+        "audited_export_path",
+        "risk_model_id",
+    )
+    provenance: dict[str, str] = {}
+    missing_fields: list[str] = []
+    for field_name in required_fields:
+        value = str(provenance_payload.get(field_name, "")).strip()
+        if not value:
+            missing_fields.append(field_name)
+            continue
+        provenance[field_name] = value
+
+    if missing_fields:
+        raise ValueError(
+            "Residual component snapshot provenance is missing required fields: "
+            + ", ".join(missing_fields)
+        )
+    return provenance
+
+
+def _load_required_residual_snapshot_coverage(
+    *,
+    path: Path | str,
+    target_id: str,
+) -> set[tuple[str, str]]:
+    resolved_path = _resolve_project_path(path)
+    if not resolved_path.exists():
+        raise ValueError(
+            f"Residual snapshot required coverage file not found: {resolved_path}"
+        )
+    payload = _read_json(resolved_path)
+    schema_version = int(payload.get("schema_version", 0))
+    if schema_version != 1:
+        raise ValueError(
+            "Unsupported residual snapshot required coverage schema version: "
+            f"{schema_version}"
+        )
+    artifact_type = str(payload.get("artifact_type", ""))
+    if artifact_type != "residual_snapshot_required_coverage":
+        raise ValueError(
+            f"Unsupported residual snapshot required coverage type: {artifact_type}"
+        )
+    coverage_target_id = str(payload.get("target_id", ""))
+    if coverage_target_id != target_id:
+        raise ValueError(
+            "Residual snapshot required coverage target_id does not match expected target_id."
+        )
+
+    required_observations: set[tuple[str, str]] = set()
+    for step in payload.get("records_by_trade_date", []):
+        trade_date = str(step.get("trade_date", "")).strip()
+        if not trade_date:
+            raise ValueError("Residual snapshot required coverage step missing trade_date.")
+        for asset_id in step.get("required_union_asset_ids", []):
+            normalized_asset_id = str(asset_id).strip()
+            if not normalized_asset_id:
+                raise ValueError(
+                    f"Residual snapshot required coverage contains a blank asset_id on {trade_date}."
+                )
+            required_observations.add((trade_date, normalized_asset_id))
+
+    if not required_observations:
+        raise ValueError(
+            "Residual snapshot required coverage must contain at least one observation."
+        )
+
+    return required_observations
 
 
 def _build_warnings(limit_lock_mode: str) -> list[str]:

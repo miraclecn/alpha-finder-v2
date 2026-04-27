@@ -13,6 +13,7 @@ from alpha_find_v2.config_loader import (
     load_portfolio,
     load_portfolio_construction_model,
     load_promotion_gate,
+    load_regime_overlay,
     load_risk_model,
     load_sleeve,
     load_target,
@@ -108,6 +109,31 @@ class ConfigLoaderTest(unittest.TestCase):
         self.assertEqual(execution_policy.blocked_trade_policy, "carry_positions")
         self.assertEqual(decay_monitor.comparison_mode, "promotion_snapshot")
         self.assertIn(20, decay_monitor.observation_windows)
+
+    def test_regime_overlay_registry_is_green_only_and_three_state(self) -> None:
+        overlay = load_regime_overlay(
+            CONFIG_ROOT / "regime_overlays" / "a_share_risk_overlay.toml"
+        )
+
+        self.assertEqual(overlay.id, "a_share_risk_overlay")
+        self.assertEqual(
+            overlay.required_inputs,
+            [
+                "benchmark_trend",
+                "market_breadth",
+                "dispersion",
+                "realized_volatility",
+                "price_limit_stress",
+            ],
+        )
+        self.assertEqual(
+            overlay.allowed_states,
+            ["normal", "de_risk", "cash_heavier"],
+        )
+        self.assertEqual(overlay.stop_inputs, ["price_limit_stress"])
+        self.assertAlmostEqual(overlay.normal_gross_exposure, 1.0)
+        self.assertAlmostEqual(overlay.de_risk_gross_exposure, 0.65)
+        self.assertAlmostEqual(overlay.cash_heavier_gross_exposure, 0.35)
 
     def test_descriptor_set_members_match_thesis_data_needs(self) -> None:
         descriptor_set = load_descriptor_set(

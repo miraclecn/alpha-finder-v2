@@ -11,6 +11,7 @@ from .models import (
 )
 from .portfolio_constructor import (
     PortfolioConstructionInput,
+    PortfolioConstructionStep,
     PortfolioConstructionResult,
     PortfolioConstructor,
     SleeveConstructionInput,
@@ -25,6 +26,13 @@ from .promotion_gate_evaluator import (
     PortfolioPromotionGateEvaluator,
     PromotionDecision,
     SleevePromotionSnapshot,
+)
+from .regime_overlay import (
+    RegimeOverlay,
+    RegimeOverlayDecision,
+    RegimeOverlayEvaluator,
+    RegimeOverlayObservationStep,
+    RegimeOverlaySummary,
 )
 from .research_evaluator import (
     MarginalContributionSummary,
@@ -93,6 +101,10 @@ class PortfolioPromotionReplayInput:
     baseline_portfolio: PortfolioRecipe
     candidate_portfolio: PortfolioRecipe
     artifacts: list[SleeveResearchArtifact] = field(default_factory=list)
+    regime_overlay: RegimeOverlay | None = None
+    regime_overlay_observations: list[RegimeOverlayObservationStep] = field(
+        default_factory=list
+    )
     periods_per_year: int = 52
     benchmark_industry_weights_by_date: dict[str, dict[str, float]] = field(default_factory=dict)
     cost_scenario_pass: dict[str, bool] = field(default_factory=dict)
@@ -239,6 +251,14 @@ class ReplayRegimeEvidence:
 
 
 @dataclass(slots=True)
+class ReplayRegimeOverlayEvidence:
+    decisions: list[RegimeOverlayDecision] = field(default_factory=list)
+    summary: RegimeOverlaySummary = field(
+        default_factory=lambda: RegimeOverlaySummary(overlay_id="")
+    )
+
+
+@dataclass(slots=True)
 class PortfolioPromotionReplayResult:
     baseline_construction: PortfolioConstructionResult
     candidate_construction: PortfolioConstructionResult
@@ -252,6 +272,7 @@ class PortfolioPromotionReplayResult:
     decision: PromotionDecision | None = None
     walk_forward: ReplayWalkForwardEvidence | None = None
     regime_breakdown: ReplayRegimeEvidence | None = None
+    regime_overlay: ReplayRegimeOverlayEvidence | None = None
 
 
 @dataclass(slots=True)
@@ -347,17 +368,29 @@ class PortfolioPromotionReplay:
             default_cost_model=self.default_cost_model,
             cost_models=self.cost_models,
         ).run(baseline_construction.to_rebalance_inputs())
+        baseline_summary = self.evaluator.summarize(
+            baseline_simulation,
+            periods_per_year=replay_input.periods_per_year,
+        )
+        regime_overlay_summary = None
+        regime_overlay_evidence = None
+        if replay_input.regime_overlay is not None:
+            regime_overlay_evidence = self._build_regime_overlay_evidence(
+                replay_input=replay_input,
+                trade_dates=trade_dates,
+            )
+            candidate_construction = self._construction_with_overlay_budget(
+                construction=candidate_construction,
+                overlay=replay_input.regime_overlay,
+                decisions=regime_overlay_evidence.decisions,
+            )
+            regime_overlay_summary = regime_overlay_evidence.summary
         candidate_simulation = PortfolioSimulator(
             mandate=self.mandate,
             portfolio=replay_input.candidate_portfolio,
             default_cost_model=self.default_cost_model,
             cost_models=self.cost_models,
         ).run(candidate_construction.to_rebalance_inputs())
-
-        baseline_summary = self.evaluator.summarize(
-            baseline_simulation,
-            periods_per_year=replay_input.periods_per_year,
-        )
         candidate_summary = self.evaluator.summarize(
             candidate_simulation,
             periods_per_year=replay_input.periods_per_year,
@@ -385,6 +418,7 @@ class PortfolioPromotionReplay:
             correlation_to_existing_portfolio=replay_input.correlation_to_existing_portfolio,
             marginal_ir_delta=marginal.marginal_ir_delta,
             marginal_drawdown_increase=marginal.marginal_drawdown_increase,
+            regime_overlay_summary=regime_overlay_summary,
         )
         decision = None
         if self.gate_evaluator is not None:
@@ -401,7 +435,91 @@ class PortfolioPromotionReplay:
             diagnostics=diagnostics,
             snapshot=snapshot,
             decision=decision,
+            regime_overlay=regime_overlay_evidence,
         )
+
+    def _build_regime_overlay_evidence(
+        self,
+        *,
+        replay_input: PortfolioPromotionReplayInput,
+        trade_dates: list[str],
+    ) -> ReplayRegimeOverlayEvidence:
+        assert replay_input.regime_overlay is not None
+        evaluator = RegimeOverlayEvaluator(replay_input.regime_overlay)
+        evidence = evaluator.evaluate_history(
+            trade_dates=trade_dates,
+            observations=replay_input.regime_overlay_observations,
+        )
+        return ReplayRegimeOverlayEvidence(
+            decisions=evidence.decisions,
+            summary=evidence.summary,
+        )
+
+    def _construction_with_overlay_budget(
+        self,
+        *,
+        construction: PortfolioConstructionResult,
+        overlay: RegimeOverlay,
+        decisions: list[RegimeOverlayDecision],
+    ) -> PortfolioConstructionResult:
+        decisions_by_date = {
+            decision.trade_date: decision
+            for decision in decisions
+        }
+        adjusted_steps: list[PortfolioConstructionStep] = []
+        for step in construction.steps:
+            decision = decisions_by_date.get(step.trade_date)
+            if decision is None:
+                raise ValueError(
+                    "Replay overlay evidence must cover every construction trade date: "
+                    f"{step.trade_date}"
+                )
+            overlay_exposure = self._overlay_gross_exposure(
+                overlay=overlay,
+                decision=decision,
+            )
+            adjusted_signals = [
+                PortfolioSecuritySignal(
+                    asset_id=signal.asset_id,
+                    target_weight=signal.target_weight * overlay_exposure,
+                    realized_return=signal.realized_return,
+                    cost_model_id=signal.cost_model_id,
+                    industry=signal.industry,
+                    trade_state=signal.trade_state,
+                )
+                for signal in step.signals
+            ]
+            adjusted_steps.append(
+                PortfolioConstructionStep(
+                    trade_date=step.trade_date,
+                    combined_weights={
+                        signal.asset_id: signal.target_weight
+                        for signal in adjusted_signals
+                    },
+                    signals=adjusted_signals,
+                    overlap_names=list(step.overlap_names),
+                    dropped_names=list(step.dropped_names),
+                    capped_names=list(step.capped_names),
+                    industry_scaled_names=list(step.industry_scaled_names),
+                    cash_weight=max(
+                        1.0 - sum(signal.target_weight for signal in adjusted_signals),
+                        0.0,
+                    ),
+                )
+            )
+        return PortfolioConstructionResult(steps=adjusted_steps)
+
+    def _overlay_gross_exposure(
+        self,
+        *,
+        overlay: RegimeOverlay,
+        decision: RegimeOverlayDecision,
+    ) -> float:
+        if decision.state == "cash_heavier":
+            return overlay.cash_heavier_gross_exposure
+        if decision.state == "de_risk":
+            return overlay.de_risk_gross_exposure
+        return overlay.normal_gross_exposure
 
     def _build_walk_forward_evidence(
         self,
@@ -662,6 +780,12 @@ class PortfolioPromotionReplay:
                 for trade_date, weights in replay_input.benchmark_industry_weights_by_date.items()
                 if trade_date in selected_trade_dates
             },
+            regime_overlay=replay_input.regime_overlay,
+            regime_overlay_observations=[
+                step
+                for step in replay_input.regime_overlay_observations
+                if step.trade_date in selected_trade_dates
+            ],
             cost_scenario_pass=replay_input.cost_scenario_pass,
             regime_pass=replay_input.regime_pass,
             max_component_correlation=replay_input.max_component_correlation,

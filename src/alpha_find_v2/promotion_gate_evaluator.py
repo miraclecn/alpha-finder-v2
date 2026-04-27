@@ -20,6 +20,10 @@ class SleevePromotionSnapshot:
     limit_locked_name_share: float = 0.0
     marginal_ir_delta: float = 0.0
     marginal_drawdown_increase: float = 0.0
+    regime_overlay_id: str = ""
+    regime_overlay_blocked_periods: int = 0
+    regime_overlay_missing_inputs: list[str] = field(default_factory=list)
+    regime_overlay_invalid_inputs: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -127,6 +131,17 @@ class PortfolioPromotionGateEvaluator:
                 passed.append("max_marginal_drawdown_increase")
             else:
                 failed.append("max_marginal_drawdown_increase")
+
+        if snapshot.regime_overlay_id:
+            if snapshot.regime_overlay_blocked_periods > 0:
+                failed.append("regime_overlay_blocked")
+            elif not snapshot.regime_overlay_missing_inputs and not snapshot.regime_overlay_invalid_inputs:
+                passed.append("regime_overlay_complete")
+
+            if snapshot.regime_overlay_missing_inputs:
+                failed.append("regime_overlay_missing_inputs")
+            if snapshot.regime_overlay_invalid_inputs:
+                failed.append("regime_overlay_invalid_inputs")
 
         return PromotionDecision(
             passed=not failed,

@@ -1,7 +1,7 @@
 schema_version = 1
 artifact_type = "portfolio_promotion_replay_case"
 case_id = "trend_real_output_weekly_replay"
-description = "Replay a baseline trend-only weekly book against a proposed trend-plus-resilience weekly book using generated output artifacts on the honest 2025-08-29+ decision calendar."
+description = "Replay a baseline trend-only weekly book against a proposed trend-plus-resilience weekly book using generated output artifacts on the widened 2021-03-05+ decision calendar."
 baseline_portfolio_path = "research/examples/promotion_replay_real_output/baseline_portfolio.toml"
 candidate_portfolio_path = "research/examples/promotion_replay_real_output/candidate_portfolio.toml"
 default_cost_model_path = "config/cost_models/base_a_share_cash.toml"
@@ -19,20 +19,16 @@ correlation_to_existing_portfolio = 0.55
 turnover_budget = 0.55
 
 [[walk_forward_splits]]
-split_id = "anchor_20250829"
-start_trade_date = "20250829"
+split_id = "anchor_20210305"
+start_trade_date = "20210305"
 
 [[walk_forward_splits]]
-split_id = "anchor_20251020"
-start_trade_date = "20251020"
+split_id = "anchor_20230109"
+start_trade_date = "20230109"
 
 [[walk_forward_splits]]
-split_id = "anchor_20251201"
-start_trade_date = "20251201"
-
-[[walk_forward_splits]]
-split_id = "anchor_20260114"
-start_trade_date = "20260114"
+split_id = "anchor_20250102"
+start_trade_date = "20250102"
 
 [cost_scenario_pass]
 base = true

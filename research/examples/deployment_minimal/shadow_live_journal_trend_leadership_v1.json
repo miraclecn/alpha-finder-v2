@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "artifact_type": "shadow_live_journal",
+  "candidate_bundle_path": "research/examples/deployment_minimal/trend_leadership_live_candidate_v1.toml",
+  "started_at": "2026-04-21",
+  "cycles": [
+    {
+      "run_manifest_path": "research/examples/deployment_minimal/trend_live_candidate_run_manifest_2026_04_20.json",
+      "manual_execution_outcome_path": "research/examples/deployment_minimal/trend_live_candidate_manual_execution_outcome_2026_04_21.json",
+      "realized_trading_window_path": "research/examples/deployment_minimal/trend_live_candidate_realized_trading_window_2026_05_18.json"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+schema_version = 1
+artifact_type = "portfolio_promotion_replay_case"
+case_id = "promotion_replay_minimal_with_overlay"
+description = "Minimal persisted replay case that binds a formal regime overlay observation history to the candidate portfolio."
+baseline_portfolio_path = "research/examples/promotion_replay_minimal/baseline_portfolio.toml"
+candidate_portfolio_path = "research/examples/promotion_replay_minimal/candidate_portfolio_with_overlay.toml"
+default_cost_model_path = "config/cost_models/base_a_share_cash.toml"
+additional_cost_model_paths = [
+  "config/cost_models/high_a_share_cash.toml",
+]
+benchmark_state_path = "research/examples/promotion_replay_minimal/benchmark_state_history.json"
+regime_overlay_observation_path = "research/examples/promotion_replay_minimal/regime_overlay_observations.json"
+artifact_paths = [
+  "research/examples/promotion_replay_minimal/sleeve_artifacts/fundamental_rerating_core.json",
+  "research/examples/promotion_replay_minimal/sleeve_artifacts/fundamental_rerating_satellite.json",
+]
+periods_per_year = 52
+max_component_correlation = 0.35
+correlation_to_existing_portfolio = 0.25
+turnover_budget = 0.70
+
+[cost_scenario_pass]
+base = true
+
+[regime_pass]
+bull = true

@@ -260,11 +260,14 @@ def _write_residual_component_snapshot(
     target_id: str,
     trade_dates: list[str],
     security_ids: list[str],
+    include_provenance: bool = True,
+    risk_model_id: str = "a_share_core_equity",
 ) -> None:
     payload = {
         "schema_version": 1,
         "artifact_type": "residual_component_snapshot",
         "target_id": target_id,
+        "risk_model_id": risk_model_id,
         "steps": [
             {
                 "trade_date": trade_date,
@@ -282,6 +285,36 @@ def _write_residual_component_snapshot(
                 ],
             }
             for trade_date in trade_dates
+        ],
+    }
+    if include_provenance:
+        payload["provenance"] = {
+            "benchmark_definition": "CSI 800",
+            "industry_schema": "sw2021_l1",
+            "generation_date": "2026-04-25",
+            "audited_export_path": "/audit/export/residual_component_snapshot.py",
+            "risk_model_id": risk_model_id,
+        }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _write_residual_snapshot_required_coverage(
+    path: Path,
+    *,
+    target_id: str,
+    records_by_trade_date: dict[str, list[str]],
+) -> None:
+    payload = {
+        "schema_version": 1,
+        "artifact_type": "residual_snapshot_required_coverage",
+        "target_id": target_id,
+        "records_by_trade_date": [
+            {
+                "trade_date": trade_date,
+                "required_union_asset_count": len(asset_ids),
+                "required_union_asset_ids": asset_ids,
+            }
+            for trade_date, asset_ids in records_by_trade_date.items()
         ],
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -404,6 +437,81 @@ class FundamentalResearchInputBuilderTest(unittest.TestCase):
                 ["600001.SH", "600003.SH"],
             )
 
+    def test_builder_treats_intraday_industry_changes_as_not_same_day_usable(self) -> None:
+        from alpha_find_v2.fundamental_research_input_builder import (
+            build_fundamental_research_observation_input,
+            load_fundamental_research_input_build_case,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            source_db = temp_root / "research_source.duckdb"
+            case_path = temp_root / "build_case.toml"
+            sleeve_path = temp_root / "fundamental_rerating_core_test.toml"
+            residual_snapshot_path = temp_root / "residual_components.json"
+            trade_dates = _trading_days(date(2024, 1, 2), 70)
+            first_signal = trade_dates[20]
+            intraday_cutover = (
+                f"{first_signal[:4]}-{first_signal[4:6]}-{first_signal[6:8]} 12:00:00"
+            )
+            _create_fundamental_source_db(source_db, trade_dates)
+            _write_temp_fundamental_sleeve(sleeve_path)
+            _write_residual_component_snapshot(
+                residual_snapshot_path,
+                target_id="open_t1_to_open_t20_residual_net_cost",
+                trade_dates=[first_signal],
+                security_ids=["600001.SH", "600002.SH", "600003.SH", "600004.SH"],
+            )
+
+            conn = duckdb.connect(str(source_db))
+            conn.execute("DELETE FROM industry_classification_pit")
+            conn.executemany(
+                """
+                INSERT INTO industry_classification_pit VALUES (?, ?, ?, ?, ?)
+                """,
+                [
+                    ("600001.SH", "sw2021_l1", "bank", "20200102", intraday_cutover),
+                    ("600001.SH", "sw2021_l1", "tech", intraday_cutover, None),
+                    ("600002.SH", "sw2021_l1", "bank", "20200102", None),
+                    ("600003.SH", "sw2021_l1", "tech", "20200102", None),
+                    ("600004.SH", "sw2021_l1", "tech", "20200102", None),
+                ],
+            )
+            conn.close()
+
+            case_path.write_text(
+                "\n".join(
+                    [
+                        'schema_version = 1',
+                        'artifact_type = "fundamental_research_input_build_case"',
+                        'case_id = "fundamental_intraday_industry_case"',
+                        'description = "Use conservative PIT timing for intraday industry changes."',
+                        f'sleeve_path = "{sleeve_path}"',
+                        f'source_db_path = "{source_db}"',
+                        f'output_path = "{temp_root / "fundamental_input.json"}"',
+                        f'residual_component_snapshot_path = "{residual_snapshot_path}"',
+                        f'start_date = "{first_signal}"',
+                        f'end_date = "{first_signal}"',
+                        'min_listing_days = 120',
+                        'lookback_days = 20',
+                        'turnover_window_days = 20',
+                        'rebalance_stride = 5',
+                        'industry_label_source = "industry_classification_pit"',
+                        'industry_schema = "sw2021_l1"',
+                        'limit_lock_mode = "disabled"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            loaded_case = load_fundamental_research_input_build_case(case_path)
+            result = build_fundamental_research_observation_input(loaded_case)
+
+            first_step = result.observation_input.steps[0]
+            self.assertEqual([record.asset_id for record in first_step.records], ["600001.SH", "600003.SH"])
+            self.assertEqual([record.industry for record in first_step.records], ["bank", "tech"])
+
     def test_builder_requires_residual_component_snapshot_for_residual_target(self) -> None:
         from alpha_find_v2.fundamental_research_input_builder import load_fundamental_research_input_build_case
 
@@ -494,6 +602,175 @@ class FundamentalResearchInputBuilderTest(unittest.TestCase):
                 "Missing residual components for selected observation: 600001\\.SH",
             ):
                 build_fundamental_research_observation_input(loaded_case)
+
+    def test_validate_residual_snapshot_accepts_required_coverage(self) -> None:
+        from alpha_find_v2.fundamental_research_input_builder import (
+            validate_residual_component_snapshot_intake,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            residual_snapshot_path = temp_root / "residual_components.json"
+            required_coverage_path = temp_root / "required_coverage.json"
+            _write_residual_component_snapshot(
+                residual_snapshot_path,
+                target_id="open_t1_to_open_t20_residual_net_cost",
+                trade_dates=["20260305", "20260312"],
+                security_ids=["600001.SH", "600003.SH"],
+            )
+            _write_residual_snapshot_required_coverage(
+                required_coverage_path,
+                target_id="open_t1_to_open_t20_residual_net_cost",
+                records_by_trade_date={
+                    "20260305": ["600001.SH", "600003.SH"],
+                    "20260312": ["600001.SH", "600003.SH"],
+                },
+            )
+
+            validated = validate_residual_component_snapshot_intake(
+                path=residual_snapshot_path,
+                target_id="open_t1_to_open_t20_residual_net_cost",
+                risk_model_id="a_share_core_equity",
+                required_components=["benchmark", "industry", "size", "beta"],
+                required_coverage_path=required_coverage_path,
+            )
+
+            self.assertEqual(validated.step_count, 2)
+            self.assertEqual(validated.record_count, 4)
+            self.assertEqual(validated.provenance["benchmark_definition"], "CSI 800")
+            self.assertEqual(
+                validated.components_by_observation[("20260305", "600001.SH")]["beta"],
+                0.002,
+            )
+
+    def test_validate_residual_snapshot_rejects_missing_provenance(self) -> None:
+        from alpha_find_v2.fundamental_research_input_builder import (
+            validate_residual_component_snapshot_intake,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            residual_snapshot_path = temp_root / "residual_components.json"
+            _write_residual_component_snapshot(
+                residual_snapshot_path,
+                target_id="open_t1_to_open_t20_residual_net_cost",
+                trade_dates=["20260305"],
+                security_ids=["600001.SH"],
+                include_provenance=False,
+            )
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "Residual component snapshot must include provenance metadata",
+            ):
+                validate_residual_component_snapshot_intake(
+                    path=residual_snapshot_path,
+                    target_id="open_t1_to_open_t20_residual_net_cost",
+                    risk_model_id="a_share_core_equity",
+                    required_components=["benchmark", "industry", "size", "beta"],
+                )
+
+    def test_validate_residual_snapshot_rejects_missing_snapshot_file(self) -> None:
+        from alpha_find_v2.fundamental_research_input_builder import (
+            validate_residual_component_snapshot_intake,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            missing_snapshot_path = temp_root / "missing_snapshot.json"
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "Residual component snapshot file not found",
+            ):
+                validate_residual_component_snapshot_intake(
+                    path=missing_snapshot_path,
+                    target_id="open_t1_to_open_t20_residual_net_cost",
+                    risk_model_id="a_share_core_equity",
+                    required_components=["benchmark", "industry", "size", "beta"],
+                )
+
+    def test_validate_residual_snapshot_rejects_missing_required_coverage(self) -> None:
+        from alpha_find_v2.fundamental_research_input_builder import (
+            validate_residual_component_snapshot_intake,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            residual_snapshot_path = temp_root / "residual_components.json"
+            required_coverage_path = temp_root / "required_coverage.json"
+            _write_residual_component_snapshot(
+                residual_snapshot_path,
+                target_id="open_t1_to_open_t20_residual_net_cost",
+                trade_dates=["20260305"],
+                security_ids=["600001.SH"],
+            )
+            _write_residual_snapshot_required_coverage(
+                required_coverage_path,
+                target_id="open_t1_to_open_t20_residual_net_cost",
+                records_by_trade_date={
+                    "20260305": ["600001.SH", "600003.SH"],
+                },
+            )
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "Residual component snapshot is missing required coverage observations",
+            ):
+                validate_residual_component_snapshot_intake(
+                    path=residual_snapshot_path,
+                    target_id="open_t1_to_open_t20_residual_net_cost",
+                    risk_model_id="a_share_core_equity",
+                    required_components=["benchmark", "industry", "size", "beta"],
+                    required_coverage_path=required_coverage_path,
+                )
+
+    def test_cli_validate_residual_snapshot_emits_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            residual_snapshot_path = temp_root / "residual_components.json"
+            required_coverage_path = temp_root / "required_coverage.json"
+            _write_residual_component_snapshot(
+                residual_snapshot_path,
+                target_id="open_t1_to_open_t20_residual_net_cost",
+                trade_dates=["20260305"],
+                security_ids=["600001.SH", "600003.SH"],
+            )
+            _write_residual_snapshot_required_coverage(
+                required_coverage_path,
+                target_id="open_t1_to_open_t20_residual_net_cost",
+                records_by_trade_date={
+                    "20260305": ["600001.SH", "600003.SH"],
+                },
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    "-m",
+                    "alpha_find_v2",
+                    "validate-residual-snapshot",
+                    "--path",
+                    str(residual_snapshot_path),
+                    "--required-coverage-path",
+                    str(required_coverage_path),
+                ],
+                cwd=Path(__file__).resolve().parents[1],
+                env={"PYTHONPATH": "src"},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "validated")
+            self.assertEqual(
+                payload["required_coverage_observation_count"],
+                2,
+            )
+            self.assertEqual(payload["record_count"], 2)
+            self.assertEqual(payload["provenance"]["industry_schema"], "sw2021_l1")
 
     def test_cli_build_fundamental_research_input_writes_output_file(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -1,0 +1,37 @@
+schema_version = 1
+artifact_type = "portfolio_promotion_replay_case"
+case_id = "trend_and_fundamental_residual_real_output_weekly_replay"
+description = "Replay a residualized trend-only weekly book against a proposed residual trend-plus-fundamental weekly book using generated output artifacts on the honest 2026-03-05+ decision calendar."
+baseline_portfolio_path = "research/examples/promotion_replay_real_output_residual/baseline_portfolio.toml"
+candidate_portfolio_path = "research/examples/promotion_replay_real_output_residual/candidate_portfolio.toml"
+default_cost_model_path = "config/cost_models/base_a_share_cash.toml"
+additional_cost_model_paths = [
+  "config/cost_models/high_a_share_cash.toml",
+]
+benchmark_state_path = "output/csi800_benchmark_state_history.json"
+artifact_paths = [
+  "output/trend_leadership_core_residual_artifact.json",
+  "output/fundamental_rerating_core_artifact.json",
+]
+periods_per_year = 52
+max_component_correlation = 0.60
+correlation_to_existing_portfolio = 0.55
+turnover_budget = 0.55
+
+[[walk_forward_splits]]
+split_id = "anchor_20260305"
+start_trade_date = "20260305"
+
+[[walk_forward_splits]]
+split_id = "anchor_20260312"
+start_trade_date = "20260312"
+
+[[walk_forward_splits]]
+split_id = "anchor_20260319"
+start_trade_date = "20260319"
+
+[cost_scenario_pass]
+base = true
+
+[regime_pass]
+bull = true

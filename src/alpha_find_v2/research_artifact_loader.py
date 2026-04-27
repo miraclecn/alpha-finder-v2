@@ -14,6 +14,7 @@ from .config_loader import (
     load_portfolio,
     load_portfolio_construction_model,
     load_promotion_gate,
+    load_regime_overlay,
     load_risk_model,
     load_sleeve,
     load_target,
@@ -25,6 +26,7 @@ from .models import (
     PortfolioConstructionModel,
     PortfolioRecipe,
     PromotionGate,
+    RegimeOverlay,
     ResidualTarget,
     RiskModel,
     Sleeve,
@@ -37,6 +39,10 @@ from .portfolio_promotion_replay import (
     SleeveSignalRecord,
 )
 from .portfolio_simulator import TradeConstraintState
+from .regime_overlay import (
+    RegimeOverlayObservationArtifact,
+    load_regime_overlay_observation_artifact,
+)
 from .target_builder import TradeLegState
 
 
@@ -61,6 +67,7 @@ class PortfolioPromotionReplayCaseDefinition:
     additional_cost_model_paths: list[str] = field(default_factory=list)
     benchmark_state_path: str = ""
     benchmark_industry_weights_path: str = ""
+    regime_overlay_observation_path: str = ""
     periods_per_year: int = 52
     cost_scenario_pass: dict[str, bool] = field(default_factory=dict)
     regime_pass: dict[str, bool] = field(default_factory=dict)
@@ -96,6 +103,9 @@ class PortfolioPromotionReplayCaseDefinition:
             benchmark_industry_weights_path=str(
                 data.get("benchmark_industry_weights_path", "")
             ),
+            regime_overlay_observation_path=str(
+                data.get("regime_overlay_observation_path", "")
+            ),
             periods_per_year=int(data.get("periods_per_year", 52)),
             cost_scenario_pass={
                 str(key): bool(value)
@@ -127,6 +137,8 @@ class LoadedPortfolioPromotionReplayCase:
     gate: PromotionGate | None = None
     cost_models: dict[str, CostModel] = field(default_factory=dict)
     benchmark_state_artifact: BenchmarkStateArtifact | None = None
+    regime_overlay: RegimeOverlay | None = None
+    regime_overlay_observations: RegimeOverlayObservationArtifact | None = None
 
 
 @dataclass(slots=True)
@@ -339,10 +351,48 @@ def load_portfolio_promotion_replay_case(
                 "Replay case benchmark state must match the candidate portfolio benchmark."
             )
 
+    regime_overlay = None
+    regime_overlay_observations = None
+    if candidate_portfolio.regime_overlay_id:
+        regime_overlay = load_regime_overlay(
+            CONFIG_ROOT
+            / "regime_overlays"
+            / f"{candidate_portfolio.regime_overlay_id}.toml"
+        )
+        if not definition.regime_overlay_observation_path:
+            raise ValueError(
+                "Replay case must define regime_overlay_observation_path when the candidate portfolio declares regime_overlay_id."
+            )
+        regime_overlay_observations = load_regime_overlay_observation_artifact(
+            definition.regime_overlay_observation_path
+        )
+        if regime_overlay.mandate_id != candidate_portfolio.mandate_id:
+            raise ValueError(
+                "Replay case regime overlay mandate must match the candidate portfolio mandate."
+            )
+        if regime_overlay.benchmark != candidate_portfolio.benchmark:
+            raise ValueError(
+                "Replay case regime overlay benchmark must match the candidate portfolio benchmark."
+            )
+        if regime_overlay_observations.overlay_id != regime_overlay.id:
+            raise ValueError(
+                "Replay case regime overlay observations must match the configured regime_overlay_id."
+            )
+    elif definition.regime_overlay_observation_path:
+        raise ValueError(
+            "Replay case cannot define regime_overlay_observation_path without a candidate portfolio regime_overlay_id."
+        )
+
     replay_input = PortfolioPromotionReplayInput(
         baseline_portfolio=baseline_portfolio,
         candidate_portfolio=candidate_portfolio,
         artifacts=artifacts,
+        regime_overlay=regime_overlay,
+        regime_overlay_observations=(
+            regime_overlay_observations.steps
+            if regime_overlay_observations is not None
+            else []
+        ),
         periods_per_year=definition.periods_per_year,
         benchmark_industry_weights_by_date=benchmark_weights_by_date,
         cost_scenario_pass=definition.cost_scenario_pass,
@@ -361,6 +411,8 @@ def load_portfolio_promotion_replay_case(
         gate=gate,
         cost_models=cost_models,
         benchmark_state_artifact=benchmark_artifact,
+        regime_overlay=regime_overlay,
+        regime_overlay_observations=regime_overlay_observations,
     )
 
 

@@ -117,6 +117,10 @@ def build_benchmark_state_artifact(
     for row in rows:
         rows_by_date.setdefault(row.trade_date, []).append(row)
 
+    earliest_continuous_full_coverage_date = _earliest_continuous_full_industry_coverage_date(
+        trade_dates=trade_dates,
+        rows_by_date=rows_by_date,
+    )
     steps: list[BenchmarkStateStep] = []
     for trade_date in trade_dates:
         date_rows = rows_by_date.get(trade_date, [])
@@ -124,6 +128,24 @@ def build_benchmark_state_artifact(
             raise ValueError(
                 f"Missing benchmark membership coverage for {loaded_case.definition.benchmark_id} on {trade_date}"
             )
+        missing_industry_row = next(
+            (row for row in date_rows if not row.industry_code),
+            None,
+        )
+        if missing_industry_row is not None:
+            message = (
+                "Missing PIT industry classification for benchmark member: "
+                f"{missing_industry_row.security_id} on {trade_date}"
+            )
+            if (
+                earliest_continuous_full_coverage_date
+                and earliest_continuous_full_coverage_date > trade_date
+            ):
+                message += (
+                    "; earliest continuous full PIT industry coverage date is "
+                    f"{earliest_continuous_full_coverage_date}"
+                )
+            raise ValueError(message)
         steps.append(
             _build_step(
                 trade_date=trade_date,
@@ -226,6 +248,20 @@ def _build_step(
         industry_weights=industry_weights,
         constituents=constituents,
     )
+
+
+def _earliest_continuous_full_industry_coverage_date(
+    *,
+    trade_dates: list[str],
+    rows_by_date: dict[str, list[_BenchmarkMemberRow]],
+) -> str:
+    earliest_trade_date = ""
+    for trade_date in reversed(trade_dates):
+        date_rows = rows_by_date.get(trade_date, [])
+        if not date_rows or any(not row.industry_code for row in date_rows):
+            break
+        earliest_trade_date = trade_date
+    return earliest_trade_date
 
 
 def _load_trade_dates(conn: Any, *, start_date: str, end_date: str) -> list[str]:

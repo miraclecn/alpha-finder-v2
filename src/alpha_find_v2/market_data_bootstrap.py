@@ -381,6 +381,14 @@ def build_research_source_db(
             FROM industry_classification_pit
             """
         )
+    _write_data_spine_registry(
+        conn,
+        source_path=source_path,
+        supplemental_path=supplemental_path,
+        target_path=target_path,
+    )
+    _write_build_chain_registry(conn)
+    _write_data_boundary_registry(conn)
 
     summary_rows = conn.execute(
         """
@@ -514,3 +522,238 @@ def _date_key_sql(column_name: str) -> str:
             ELSE strftime(CAST({column_name} AS TIMESTAMP), '%Y%m%d')
         END
     """
+
+
+def _write_data_spine_registry(
+    conn: Any,
+    *,
+    source_path: Path,
+    supplemental_path: Path | None,
+    target_path: Path,
+) -> None:
+    conn.execute(
+        """
+        CREATE OR REPLACE TABLE data_spine_registry (
+            surface_id VARCHAR,
+            provider VARCHAR,
+            boundary_role VARCHAR,
+            path VARCHAR,
+            note VARCHAR
+        )
+        """
+    )
+    conn.execute("DELETE FROM data_spine_registry")
+    conn.executemany(
+        "INSERT INTO data_spine_registry VALUES (?, ?, ?, ?, ?)",
+        [
+            (
+                "source_market_db",
+                "audited_v1_tushare_market_source",
+                "external_source",
+                str(source_path),
+                "audited market backbone copied into V2 instead of queried live as the mixed legacy DB",
+            ),
+            (
+                "supplemental_reference_db",
+                "tushare_reference_staging",
+                "pit_reference_staging",
+                str(supplemental_path) if supplemental_path is not None else "",
+                "only PIT benchmark and industry reference staging surface for the release-1 chain",
+            ),
+            (
+                "target_research_db",
+                "v2_isolated_research_db",
+                "isolated_v2_research_surface",
+                str(target_path),
+                "only isolated V2 research DuckDB consumed by benchmark, replay, and deployment builders",
+            ),
+        ],
+    )
+
+
+def _write_build_chain_registry(conn: Any) -> None:
+    conn.execute(
+        """
+        CREATE OR REPLACE TABLE build_chain_registry (
+            step_order INTEGER,
+            command_id VARCHAR,
+            boundary_role VARCHAR,
+            note VARCHAR
+        )
+        """
+    )
+    conn.execute("DELETE FROM build_chain_registry")
+    conn.executemany(
+        "INSERT INTO build_chain_registry VALUES (?, ?, ?, ?)",
+        [
+            (
+                1,
+                "build-reference-staging-db",
+                "required_entrypoint",
+                "stage benchmark and industry PIT truth from Tushare before benchmark-state work",
+            ),
+            (
+                2,
+                "build-research-source-db",
+                "required_entrypoint",
+                "materialize the isolated V2 research DuckDB from the audited market source plus staged PIT references",
+            ),
+            (
+                3,
+                "build-benchmark-state",
+                "required_entrypoint",
+                "derive benchmark_state_history only from the isolated V2 research DuckDB",
+            ),
+        ],
+    )
+
+
+def _write_data_boundary_registry(conn: Any) -> None:
+    conn.execute(
+        """
+        CREATE OR REPLACE TABLE data_boundary_registry (
+            category VARCHAR,
+            entry_id VARCHAR,
+            decision VARCHAR,
+            note VARCHAR
+        )
+        """
+    )
+    conn.execute("DELETE FROM data_boundary_registry")
+    conn.executemany(
+        "INSERT INTO data_boundary_registry VALUES (?, ?, ?, ?)",
+        [
+            (
+                "tier_rule",
+                "green",
+                "production_truth",
+                "stable daily and structural truth used by benchmark state, trend research, tradeability checks, and regime monitoring",
+            ),
+            (
+                "tier_rule",
+                "amber",
+                "slow_anchor",
+                "slower fundamental snapshots allowed only for lag-aware anchor or veto work",
+            ),
+            (
+                "tier_rule",
+                "experimental",
+                "exploration_only",
+                "everything else, including unaudited AKShare-only fields, stays outside promotion-safe research",
+            ),
+            (
+                "allowed_reuse",
+                "daily_bar_pit",
+                "allow",
+                "point-in-time daily price and liquidity truth may feed release-1 research",
+            ),
+            (
+                "allowed_reuse",
+                "market_trade_calendar",
+                "allow",
+                "observed market calendar may feed release-1 research timing",
+            ),
+            (
+                "allowed_reuse",
+                "security_master_ref",
+                "allow",
+                "normalized A-share security master may feed release-1 research filters",
+            ),
+            (
+                "allowed_reuse",
+                "name_change_history",
+                "allow",
+                "historical ST name windows may feed tradeability and eligibility checks",
+            ),
+            (
+                "allowed_reuse",
+                "fundamental_snapshot_pit",
+                "allow",
+                "lagged fundamentals may feed slow anchor or veto logic only",
+            ),
+            (
+                "allowed_reuse",
+                "benchmark_membership_pit",
+                "allow",
+                "staged benchmark membership may enter V2 only through the PIT staging chain",
+            ),
+            (
+                "allowed_reuse",
+                "benchmark_weight_snapshot_pit",
+                "allow",
+                "staged provider benchmark weights may enter V2 only through the PIT staging chain",
+            ),
+            (
+                "allowed_reuse",
+                "industry_classification_pit",
+                "allow",
+                "staged PIT industry classification may enter V2 only through the PIT staging chain",
+            ),
+            (
+                "forbidden_reuse",
+                "v1_factor_outputs",
+                "forbid",
+                "legacy V1 factor outputs must not become V2 source-of-truth inputs",
+            ),
+            (
+                "forbidden_reuse",
+                "v1_strategy_outputs",
+                "forbid",
+                "legacy V1 strategy outputs must not become V2 source-of-truth inputs",
+            ),
+            (
+                "forbidden_reuse",
+                "v1_promotion_artifacts",
+                "forbid",
+                "legacy V1 promotion artifacts must stay outside the V2 production path",
+            ),
+            (
+                "forbidden_reuse",
+                "mixed_v1_query_time_dependency",
+                "forbid",
+                "V2 must not depend on the mixed V1 DuckDB at query time",
+            ),
+            (
+                "known_gap",
+                "first_source_suspension_realism",
+                "visible_gap",
+                "first-source suspension realism still needs a separate audited intake",
+            ),
+            (
+                "known_gap",
+                "exact_limit_state_reconstruction",
+                "visible_gap",
+                "exact price-limit state reconstruction still needs a separate audited intake",
+            ),
+            (
+                "known_gap",
+                "unaudited_akshare_only_fields",
+                "visible_gap",
+                "fields that exist only through unaudited AKShare paths remain blocked",
+            ),
+            (
+                "audit_rule",
+                "akshare_field_requires_explicit_v2_audit",
+                "required",
+                "AKShare may supplement or validate coverage gaps, but each field needs an explicit V2 audit before promotion-safe use",
+            ),
+            (
+                "failure_condition",
+                "akshare_unaudited_in_production_path",
+                "stop",
+                "stop if a production-safe path reads an unaudited AKShare-only field",
+            ),
+            (
+                "failure_condition",
+                "pit_reference_bypass_staging",
+                "stop",
+                "stop if benchmark or industry PIT references bypass staged Tushare inputs",
+            ),
+            (
+                "failure_condition",
+                "mixed_v1_live_research_dependency",
+                "stop",
+                "stop if new work keeps V2 dependent on the mixed V1 DB at query time",
+            ),
+        ],
+    )

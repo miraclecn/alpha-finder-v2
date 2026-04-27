@@ -1,0 +1,30 @@
+schema_version = 1
+artifact_type = "decay_watch_case"
+
+case_id = "candidate_portfolio_realized_watch_20d"
+description = "Evaluate decay from the realized post-trade execution window instead of an inline-only summary."
+portfolio_path = "research/examples/deployment_minimal/candidate_portfolio.toml"
+evaluation_date = "2026-05-18"
+window_label = "20d_realized"
+run_manifest_path = "research/examples/deployment_minimal/run_manifest_2026_04_20.json"
+manual_execution_outcome_path = "research/examples/deployment_minimal/manual_execution_outcome_2026_04_21.json"
+realized_trading_window_path = "research/examples/deployment_minimal/realized_trading_window_2026_05_18.json"
+
+[promotion_snapshot]
+oos_ir = 1.10
+oos_tstat = 2.20
+breadth = 5
+peak_to_trough_drawdown = 0.07
+turnover_budget = 0.70
+realized_turnover_vs_budget = 0.95
+
+[realized_summary]
+periods = 1
+average_return = 0.0
+volatility = 0.0
+ir = 0.0
+tstat = 0.0
+peak_to_trough_drawdown = 0.0
+breadth = 1
+average_turnover = 0.0
+blocked_name_share = 0.0

@@ -1,0 +1,28 @@
+schema_version = 1
+artifact_type = "live_candidate_bundle"
+
+candidate_id = "trend_leadership_shadow_live_v1"
+version = "2026-04-26"
+status = "shadow_live_eligible"
+description = "Frozen release-1 trend_leadership live-candidate bundle for shadow-live admission."
+thesis_path = "config/theses/trend_leadership.toml"
+descriptor_set_path = "config/descriptor_sets/trend_leadership_core.toml"
+sleeve_path = "config/sleeves/trend_leadership_core.toml"
+target_path = "config/targets/open_t1_to_open_t20_net_cost.toml"
+portfolio_path = "research/examples/deployment_minimal/trend_live_candidate_portfolio_with_overlay.toml"
+default_cost_model_path = "config/cost_models/base_a_share_cash.toml"
+stressed_cost_model_paths = [
+  "config/cost_models/high_a_share_cash.toml",
+]
+regime_overlay_id = "a_share_risk_overlay"
+expected_turnover_budget = 0.16
+expected_breadth_min = 12
+expected_breadth_max = 20
+max_drawdown_budget = 0.18
+weak_regime_behavior = "Reduce gross exposure through the regime overlay and accept residual cash instead of forcing replacement risk."
+current_validation_window_start = "2021-03-05"
+multi_year_validation_required = true
+multi_year_validation_audit_path = "research/examples/deployment_minimal/trend_leadership_multi_year_validation_audit_v1.json"
+probation_policy_path = "docs/operations/trend-leadership-small-capital-probation-policy.md"
+paper_trade_policy_path = "docs/operations/trend-leadership-paper-trade-signal-policy.md"
+account_export_contract_path = ""

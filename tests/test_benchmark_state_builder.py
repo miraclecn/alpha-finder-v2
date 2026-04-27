@@ -200,6 +200,168 @@ class BenchmarkStateBuilderTest(unittest.TestCase):
             ):
                 build_benchmark_state_artifact(loaded_case)
 
+    def test_builder_rejects_missing_industry_on_carried_provider_weight_snapshot(self) -> None:
+        from alpha_find_v2.benchmark_state_builder import (
+            build_benchmark_state_artifact,
+            load_benchmark_state_build_case,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            source_db = temp_root / "research_source.duckdb"
+            case_path = temp_root / "benchmark_state.toml"
+            _create_research_source_db(source_db)
+
+            conn = duckdb.connect(str(source_db))
+            conn.execute("INSERT INTO market_trade_calendar VALUES ('20240104')")
+            conn.execute(
+                """
+                DELETE FROM industry_classification_pit
+                WHERE security_id = '688001.SH'
+                """
+            )
+            conn.close()
+
+            case_path.write_text(
+                "\n".join(
+                    [
+                        'schema_version = 1',
+                        'artifact_type = "benchmark_state_build_case"',
+                        'case_id = "csi800_provider_weight_missing_industry"',
+                        'description = "Reject missing PIT industry when provider snapshots carry forward to later trade dates."',
+                        f'source_db_path = "{source_db}"',
+                        f'output_path = "{temp_root / "benchmark_state_history.json"}"',
+                        'benchmark_id = "CSI 800"',
+                        'industry_schema = "citics_l1"',
+                        'start_date = "20240104"',
+                        'end_date = "20240104"',
+                        'weighting_method = "provider_weight"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            loaded_case = load_benchmark_state_build_case(case_path)
+            with self.assertRaisesRegex(
+                ValueError,
+                "Missing PIT industry classification for benchmark member: 688001\\.SH on 20240104",
+            ):
+                build_benchmark_state_artifact(loaded_case)
+
+    def test_builder_reports_earliest_continuous_full_industry_coverage_date(self) -> None:
+        from alpha_find_v2.benchmark_state_builder import (
+            build_benchmark_state_artifact,
+            load_benchmark_state_build_case,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            source_db = temp_root / "research_source.duckdb"
+            case_path = temp_root / "benchmark_state.toml"
+            _create_research_source_db(source_db)
+
+            conn = duckdb.connect(str(source_db))
+            conn.execute(
+                """
+                UPDATE industry_classification_pit
+                SET effective_at = '20240104'
+                WHERE security_id = '688001.SH'
+                  AND industry_schema = 'citics_l1'
+                """
+            )
+            conn.execute("INSERT INTO market_trade_calendar VALUES ('20240104')")
+            conn.close()
+
+            case_path.write_text(
+                "\n".join(
+                    [
+                        'schema_version = 1',
+                        'artifact_type = "benchmark_state_build_case"',
+                        'case_id = "csi800_missing_industry_with_hint"',
+                        'description = "Report the earliest continuous full PIT industry coverage date."',
+                        f'source_db_path = "{source_db}"',
+                        f'output_path = "{temp_root / "benchmark_state_history.json"}"',
+                        'benchmark_id = "CSI 800"',
+                        'industry_schema = "citics_l1"',
+                        'start_date = "20240103"',
+                        'end_date = "20240104"',
+                        'weighting_method = "provider_weight"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            loaded_case = load_benchmark_state_build_case(case_path)
+            with self.assertRaisesRegex(
+                ValueError,
+                (
+                    "Missing PIT industry classification for benchmark member: "
+                    "688001\\.SH on 20240103.*earliest continuous full PIT industry coverage "
+                    "date is 20240104"
+                ),
+            ):
+                build_benchmark_state_artifact(loaded_case)
+
+    def test_builder_reports_continuous_full_coverage_after_later_gap(self) -> None:
+        from alpha_find_v2.benchmark_state_builder import (
+            build_benchmark_state_artifact,
+            load_benchmark_state_build_case,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            source_db = temp_root / "research_source.duckdb"
+            case_path = temp_root / "benchmark_state.toml"
+            _create_research_source_db(source_db)
+
+            conn = duckdb.connect(str(source_db))
+            conn.execute("INSERT INTO market_trade_calendar VALUES ('20240104')")
+            conn.execute("INSERT INTO market_trade_calendar VALUES ('20240105')")
+            conn.execute(
+                """
+                DELETE FROM industry_classification_pit
+                WHERE security_id = '688001.SH'
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO industry_classification_pit VALUES
+                ('688001.SH', 'citics_l1', 'industrial', '20240103', '20240104'),
+                ('688001.SH', 'citics_l1', 'industrial', '20240105', NULL)
+                """
+            )
+            conn.close()
+
+            case_path.write_text(
+                "\n".join(
+                    [
+                        'schema_version = 1',
+                        'artifact_type = "benchmark_state_build_case"',
+                        'case_id = "csi800_missing_industry_later_gap_with_hint"',
+                        'description = "Report the first date after which PIT industry coverage stays continuously full."',
+                        f'source_db_path = "{source_db}"',
+                        f'output_path = "{temp_root / "benchmark_state_history.json"}"',
+                        'benchmark_id = "CSI 800"',
+                        'industry_schema = "citics_l1"',
+                        'start_date = "20240103"',
+                        'end_date = "20240105"',
+                        'weighting_method = "provider_weight"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            loaded_case = load_benchmark_state_build_case(case_path)
+            with self.assertRaisesRegex(
+                ValueError,
+                (
+                    "Missing PIT industry classification for benchmark member: "
+                    "688001\\.SH on 20240104.*earliest continuous full PIT industry coverage "
+                    "date is 20240105"
+                ),
+            ):
+                build_benchmark_state_artifact(loaded_case)
+
     def test_builder_supports_provider_weight_snapshots(self) -> None:
         from alpha_find_v2.benchmark_state_builder import (
             build_benchmark_state_artifact,

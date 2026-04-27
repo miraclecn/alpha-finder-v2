@@ -18,6 +18,7 @@ exclude_st = true
 exclude_suspended = true
 exclude_limit_up_locked = true
 exclude_limit_down_locked = true
+exclude_boards = ["beijing"]
 min_listing_days = 120
 min_median_daily_turnover_cny_mn = 30
 

@@ -353,6 +353,43 @@ class PromotionGate:
 
 
 @dataclass(slots=True)
+class RegimeOverlay:
+    id: str
+    name: str
+    mandate_id: str
+    benchmark: str
+    description: str
+    required_inputs: list[str] = field(default_factory=list)
+    stop_inputs: list[str] = field(default_factory=list)
+    allowed_states: list[str] = field(default_factory=list)
+    de_risk_min_risk_off: int = 1
+    cash_heavier_min_risk_off: int = 3
+    normal_gross_exposure: float = 1.0
+    de_risk_gross_exposure: float = 0.65
+    cash_heavier_gross_exposure: float = 0.35
+
+    @classmethod
+    def from_toml(cls, data: JsonMap) -> "RegimeOverlay":
+        return cls(
+            id=str(data["id"]),
+            name=str(data["name"]),
+            mandate_id=str(data["mandate_id"]),
+            benchmark=str(data["benchmark"]),
+            description=str(data["description"]),
+            required_inputs=list(data.get("required_inputs", [])),
+            stop_inputs=list(data.get("stop_inputs", [])),
+            allowed_states=list(data.get("allowed_states", [])),
+            de_risk_min_risk_off=int(data.get("de_risk_min_risk_off", 1)),
+            cash_heavier_min_risk_off=int(data.get("cash_heavier_min_risk_off", 3)),
+            normal_gross_exposure=float(data.get("normal_gross_exposure", 1.0)),
+            de_risk_gross_exposure=float(data.get("de_risk_gross_exposure", 0.65)),
+            cash_heavier_gross_exposure=float(
+                data.get("cash_heavier_gross_exposure", 0.35)
+            ),
+        )
+
+
+@dataclass(slots=True)
 class Sleeve:
     id: str
     name: str
@@ -424,6 +461,7 @@ class PortfolioRecipe:
     description: str
     construction_model_id: str = ""
     promotion_gate_id: str = ""
+    regime_overlay_id: str = ""
     execution_policy_id: str = ""
     decay_monitor_id: str = ""
     sleeves: list[str] = field(default_factory=list)
@@ -445,6 +483,7 @@ class PortfolioRecipe:
             description=str(data["description"]),
             construction_model_id=str(data.get("construction_model_id", "")),
             promotion_gate_id=str(data.get("promotion_gate_id", "")),
+            regime_overlay_id=str(data.get("regime_overlay_id", "")),
             execution_policy_id=str(data.get("execution_policy_id", "")),
             decay_monitor_id=str(data.get("decay_monitor_id", "")),
             sleeves=list(data.get("sleeves", [])),

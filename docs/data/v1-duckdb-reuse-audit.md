@@ -173,6 +173,22 @@ Practical implication:
 5. `industry_classification_static` stays `amber` and must not be treated as PIT truth.
 6. `trend_leadership` can start from `daily_bar_pit + market_trade_calendar + security_master_ref`, but its industry-relative branch still needs a separate honesty pass.
 
+## Machine-Readable Phase 1 Boundary Outputs
+
+The release-1 data spine is now emitted as explicit registry tables instead of
+living only in prose:
+
+- `output/pit_reference_staging.duckdb.reference_dataset_registry` records the
+  staged PIT datasets, their source provider, and their row/date coverage.
+- `output/research_source.duckdb.data_spine_registry` records the only allowed
+  source, staging, and isolated V2 research surfaces for the Phase 1 chain.
+- `output/research_source.duckdb.build_chain_registry` records the binding
+  `build-reference-staging-db -> build-research-source-db ->
+  build-benchmark-state` order.
+- `output/research_source.duckdb.data_boundary_registry` records the
+  release-1 tier rules, reusable surfaces, forbidden reuse objects, visible
+  gaps, the `AKShare` audit rule, and explicit stop conditions.
+
 ## Immediate Next Step
 
 The next valid slice is not to fetch more random data.

@@ -1,0 +1,18 @@
+schema_version = 1
+artifact_type = "multi_year_validation_audit_build_case"
+
+case_id = "trend_leadership_shadow_live_v1_audit_build"
+description = "Rebuild the frozen trend_leadership live-candidate audit from the honest generated benchmark and trend research artifacts."
+candidate_id = "trend_leadership_shadow_live_v1"
+portfolio_path = "research/examples/deployment_minimal/trend_live_candidate_portfolio_with_overlay.toml"
+benchmark_state_build_case_path = "research/examples/benchmark_state_build_minimal/csi800.toml"
+trend_research_input_build_case_path = "research/examples/trend_input_build_minimal/trend_leadership_core.toml"
+replay_case_path = "research/examples/deployment_minimal/trend_live_candidate_overlay_replay.toml"
+minimum_calendar_years = 5.0
+as_of_date = "2026-04-27"
+output_path = "research/examples/deployment_minimal/trend_leadership_multi_year_validation_audit_v1.json"
+notes = [
+  "As of 2026-04-27, CSI 800 + sw2021_l1 benchmark constituent coverage is verified from 2014-02-21 through 2026-04-23.",
+  "Beijing-board names are excluded from the live-tradable trend input.",
+  "The 302132.SZ current-code history is resolved through a manual security_code_alias_backfill from legacy 300114.SZ industry intervals.",
+]

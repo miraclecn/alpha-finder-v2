@@ -5,6 +5,7 @@ import math
 
 from .portfolio_simulator import PortfolioSimulationResult
 from .promotion_gate_evaluator import SleevePromotionSnapshot
+from .regime_overlay import RegimeOverlaySummary
 
 
 @dataclass(slots=True)
@@ -109,6 +110,7 @@ class PortfolioResearchEvaluator:
         correlation_to_existing_portfolio: float,
         marginal_ir_delta: float,
         marginal_drawdown_increase: float,
+        regime_overlay_summary: RegimeOverlaySummary | None = None,
     ) -> SleevePromotionSnapshot:
         realized_turnover_vs_budget = 0.0
         if turnover_budget > 0.0:
@@ -128,6 +130,26 @@ class PortfolioResearchEvaluator:
             limit_locked_name_share=summary.blocked_name_share,
             marginal_ir_delta=marginal_ir_delta,
             marginal_drawdown_increase=marginal_drawdown_increase,
+            regime_overlay_id=(
+                regime_overlay_summary.overlay_id
+                if regime_overlay_summary is not None
+                else ""
+            ),
+            regime_overlay_blocked_periods=(
+                regime_overlay_summary.blocked_periods
+                if regime_overlay_summary is not None
+                else 0
+            ),
+            regime_overlay_missing_inputs=(
+                list(regime_overlay_summary.missing_inputs)
+                if regime_overlay_summary is not None
+                else []
+            ),
+            regime_overlay_invalid_inputs=(
+                list(regime_overlay_summary.invalid_inputs)
+                if regime_overlay_summary is not None
+                else []
+            ),
         )
 
     def _peak_to_trough_drawdown(self, returns: list[float]) -> float:

@@ -8,7 +8,7 @@ It is being built for one person running a real A-share research stack with:
 
 - stable daily and structural data from `Tushare 2000`
 - slower financial statement data with reporting lag
-- optional free `AKShare` supplements that may be useful, but cannot be trusted as production truth
+- optional free `AKShare` and `Baostock` supplements that may be useful, but cannot be trusted as production truth
 
 That constraint is not a weakness to hide.
 It should determine the entire system shape.
@@ -46,11 +46,25 @@ Use lagged fundamentals only for slow signals and veto logic:
 These data may support real value and quality research, but they should not be treated as fast information.
 The system must assume conservative availability and tolerate stale updates.
 
+Cross-audit supplements may also live here when they help validate the `green`
+spine without replacing it:
+
+- `AKShare` historical change nodes or convenience surfaces used only as
+  evidence
+- `Baostock` daily bars, adjustment factors, security master, and slow
+  fundamentals used only as cross-checks against the main `Tushare` chain
+- the local official Shenwan packet
+  (`StockClassifyUse_stock.xls`, `2014to2021.xlsx`,
+  `SwClassCode_2021.xls`, and the official July-2021 cross-section) used to
+  audit and conservatively reinforce `SW2021` industry PIT, but not to justify
+  static backward projection
+
 ### Experimental: not promotion-safe
 
 These can be explored, but cannot drive production promotion:
 
 - AKShare-only fields without durability guarantees
+- Baostock-only fields or transforms without a separate field audit
 - news and message data
 - same-day event timing that cannot be reconstructed honestly
 - ad hoc crowding and flow proxies without a stable history
@@ -71,6 +85,9 @@ Why it fits the personal stack:
 - it can be built mostly from daily bars, liquidity, benchmark membership, and industry history
 - the research clock is clean: signal at close, trade next open, hold for weeks
 - it is much easier to backtest honestly than news or same-day earnings logic
+- the current `sw2021_l1` industry input is now supportable by an audited,
+  slow-moving official Shenwan change-node packet even before broker-direct
+  automation exists
 
 ### 2. `fundamental_rerating`
 
@@ -131,8 +148,12 @@ The first live-candidate portfolio should be:
 Portfolio recipe:
 
 - `trend_leadership_core` as the main alpha sleeve
-- `fundamental_rerating_core` as the slow anchor sleeve
 - `risk_regime_filter` as a portfolio-level exposure governor
+
+For the current first-release live-candidate lane, `fundamental_rerating_core`
+stays outside the capital path.
+It remains a documented post-release research option until the residual
+snapshot contract is sourced and audited honestly.
 
 This is intentionally narrower than a broad multi-thesis platform.
 At personal scale, narrow and honest beats broad and noisy.
@@ -168,4 +189,6 @@ It is to build one durable research spine around:
 - slow fundamental anchoring
 - strict A-share execution realism
 
-That is the highest-probability path from a personal research environment to a strategy that is credible enough for paper trading and eventually real capital.
+That is the highest-probability path from a personal research environment to a
+strategy that is credible enough for paper trading first and only later, after
+multi-year audited validation, for real capital.

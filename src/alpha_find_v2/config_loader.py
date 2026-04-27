@@ -13,6 +13,7 @@ from .models import (
     PortfolioConstructionModel,
     PortfolioRecipe,
     PromotionGate,
+    RegimeOverlay,
     ResidualTarget,
     RiskModel,
     Sleeve,
@@ -70,6 +71,10 @@ def load_risk_model(path: Path | str) -> RiskModel:
 
 def load_promotion_gate(path: Path | str) -> PromotionGate:
     return PromotionGate.from_toml(_read_toml(path))
+
+
+def load_regime_overlay(path: Path | str) -> RegimeOverlay:
+    return RegimeOverlay.from_toml(_read_toml(path))
 
 
 def load_sleeve(path: Path | str) -> Sleeve:

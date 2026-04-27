@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "artifact_type": "realized_trading_window",
+  "run_id": "candidate_portfolio_next_open_2026_04_20",
+  "portfolio_id": "research_example_candidate_portfolio",
+  "evaluation_date": "2026-05-18",
+  "window_label": "20d_realized",
+  "window_start_date": "2026-04-21",
+  "window_end_date": "2026-05-18",
+  "realized_execution_basis": "manual_next_open_writeback",
+  "realized_holdings": [
+    {
+      "asset_id": "BBB",
+      "weight": 0.28
+    },
+    {
+      "asset_id": "CCC",
+      "weight": 0.1
+    },
+    {
+      "asset_id": "DDD",
+      "weight": 0.12
+    },
+    {
+      "asset_id": "EEE",
+      "weight": 0.38
+    }
+  ],
+  "realized_cost": {
+    "estimated_trading_cost": 0.0046,
+    "realized_trading_cost": 0.0052,
+    "slippage_bps": 18.0
+  },
+  "realized_portfolio_path": [
+    {
+      "trade_date": "2026-04-21",
+      "nav": 1.0
+    },
+    {
+      "trade_date": "2026-04-28",
+      "nav": 1.008
+    },
+    {
+      "trade_date": "2026-05-12",
+      "nav": 1.026
+    },
+    {
+      "trade_date": "2026-05-18",
+      "nav": 1.041
+    }
+  ],
+  "realized_summary": {
+    "periods": 20,
+    "average_return": 0.0019,
+    "volatility": 0.0098,
+    "ir": 0.66,
+    "tstat": 1.31,
+    "peak_to_trough_drawdown": 0.095,
+    "breadth": 4,
+    "average_turnover": 0.64,
+    "blocked_name_share": 0.12
+  }
+}
