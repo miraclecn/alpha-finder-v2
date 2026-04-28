@@ -77,6 +77,39 @@ class PortfolioSimulatorTest(unittest.TestCase):
         self.assertAlmostEqual(second_step.trading_cost, 0.001152)
         self.assertAlmostEqual(second_step.net_return, 0.00619085714285714)
 
+    def test_simulator_turnover_uses_one_way_max_side_convention(self) -> None:
+        mandate = load_mandate(CONFIG_ROOT / "mandates" / "a_share_long_only_eod.toml")
+        portfolio = load_portfolio(CONFIG_ROOT / "portfolio" / "a_share_core.toml")
+        cost_model = load_cost_model(CONFIG_ROOT / "cost_models" / "base_a_share_cash.toml")
+        simulator = PortfolioSimulator(
+            mandate=mandate,
+            portfolio=portfolio,
+            default_cost_model=cost_model,
+        )
+
+        step = simulator.plan_rebalance(
+            rebalance=PortfolioRebalanceInput(
+                trade_date="2026-04-20",
+                signals=[
+                    PortfolioSecuritySignal(
+                        asset_id="AAA",
+                        target_weight=0.20,
+                        realized_return=0.0,
+                    ),
+                    PortfolioSecuritySignal(
+                        asset_id="BBB",
+                        target_weight=0.30,
+                        realized_return=0.0,
+                    ),
+                ],
+            ),
+            current_weights={"AAA": 0.60},
+        )
+
+        self.assertAlmostEqual(step.buy_turnover, 0.30)
+        self.assertAlmostEqual(step.sell_turnover, 0.40)
+        self.assertAlmostEqual(step.turnover, 0.40)
+
 
 if __name__ == "__main__":
     unittest.main()

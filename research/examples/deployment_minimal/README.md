@@ -88,6 +88,8 @@ PYTHONPATH=src python3 -m alpha_find_v2 build-trend-research-input --case resear
 PYTHONPATH=src python3 -m alpha_find_v2 build-sleeve-artifact --case research/examples/artifact_build_minimal/trend_leadership_core_output.toml
 PYTHONPATH=src python3 -m alpha_find_v2 build-regime-overlay-observations --case research/examples/deployment_minimal/trend_live_candidate_overlay_observation_build.toml
 PYTHONPATH=src python3 -m alpha_find_v2 run-promotion-replay --case research/examples/deployment_minimal/trend_live_candidate_overlay_replay.toml
+PYTHONPATH=src python3 -m alpha_find_v2 run-portfolio-backtest --case research/examples/deployment_minimal/trend_only_portfolio_backtest.toml
+PYTHONPATH=src python3 -m alpha_find_v2 run-portfolio-backtest --case research/examples/deployment_minimal/trend_live_candidate_portfolio_backtest.toml
 PYTHONPATH=src python3 -m alpha_find_v2 build-multi-year-validation-audit --case research/examples/deployment_minimal/trend_leadership_multi_year_validation_audit_v1.toml
 PYTHONPATH=src python3 -m alpha_find_v2 build-executable-signal --case research/examples/deployment_minimal/executable_signal_real_output_case.toml
 ```
@@ -107,6 +109,12 @@ override reasons now live in first-class artifacts and can flow into
 `evaluate-decay-watch` instead of staying in chat notes or broker UI only.
 The real-output case is the current honest end-to-end frontier.
 It uses generated benchmark state and generated trend sleeve artifacts, but it still relies on a synthetic account snapshot because broker integration and tradeability reconstruction are not finished.
+Promotion replay remains a promotion-gate comparison built from artifact
+forward returns. The daily `run-portfolio-backtest` cases are the only
+acceptable historical equity-curve proof before shadow-live because they
+execute next-open orders, use adjusted `daily_bar_pit` OHLC columns for fills
+and daily marks, and record cash, costs, blocked orders, partial fills, and
+drawdown from the portfolio ledger.
 The frozen live-candidate paper-trade case is stricter:
 it requires the attached multi-year validation audit gate before rebuilding a
 fresh signal. The checked-in audit now passes, so the gated signal and manifest

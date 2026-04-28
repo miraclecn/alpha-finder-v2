@@ -308,6 +308,88 @@ def _write_temp_residual_trend_sleeve(path: Path) -> None:
 
 
 class TrendResearchInputBuilderTest(unittest.TestCase):
+    def test_turnover_confirmation_uses_own_history_baseline(self) -> None:
+        from alpha_find_v2.trend_research_input_builder import (
+            _CandidateRow,
+            _score_candidates,
+        )
+
+        common = {
+            "trade_date": "20260406",
+            "list_date": "20200102",
+            "entry_open": 10.0,
+            "exit_open": 11.0,
+            "median_turnover_cny": 200_000_000.0,
+            "entry_suspended": False,
+            "exit_suspended": False,
+            "entry_liquidity_pass": True,
+            "exit_liquidity_pass": True,
+            "entry_limit_locked": False,
+            "exit_limit_locked": False,
+            "ret_short": 0.05,
+            "ret_long": 0.10,
+            "short_return_vol": 0.02,
+        }
+        scored = _score_candidates(
+            candidates=[
+                _CandidateRow(
+                    security_id="HIGH_CONFIRMATION",
+                    turnover_baseline_cny=100_000_000.0,
+                    **common,
+                ),
+                _CandidateRow(
+                    security_id="LOW_CONFIRMATION",
+                    turnover_baseline_cny=400_000_000.0,
+                    **common,
+                ),
+            ],
+            descriptor_weights={"turnover_confirmation": 1.0},
+        )
+
+        self.assertEqual(scored[0]["candidate"].security_id, "HIGH_CONFIRMATION")
+        self.assertGreater(scored[0]["score"], scored[1]["score"])
+
+    def test_turnover_confirmation_only_rewards_positive_trends(self) -> None:
+        from alpha_find_v2.trend_research_input_builder import (
+            _CandidateRow,
+            _score_candidates,
+        )
+
+        common = {
+            "trade_date": "20260406",
+            "list_date": "20200102",
+            "entry_open": 10.0,
+            "exit_open": 11.0,
+            "median_turnover_cny": 200_000_000.0,
+            "turnover_baseline_cny": 100_000_000.0,
+            "entry_suspended": False,
+            "exit_suspended": False,
+            "entry_liquidity_pass": True,
+            "exit_liquidity_pass": True,
+            "entry_limit_locked": False,
+            "exit_limit_locked": False,
+            "ret_long": 0.10,
+            "short_return_vol": 0.02,
+        }
+        scored = _score_candidates(
+            candidates=[
+                _CandidateRow(
+                    security_id="POSITIVE_TREND",
+                    ret_short=0.05,
+                    **common,
+                ),
+                _CandidateRow(
+                    security_id="NEGATIVE_TREND",
+                    ret_short=-0.05,
+                    **common,
+                ),
+            ],
+            descriptor_weights={"turnover_confirmation": 1.0},
+        )
+
+        self.assertEqual(scored[0]["candidate"].security_id, "POSITIVE_TREND")
+        self.assertGreater(scored[0]["score"], scored[1]["score"])
+
     def test_builder_emits_weekly_trend_observation_input_from_duckdb(self) -> None:
         from alpha_find_v2.trend_research_input_builder import (
             build_trend_research_observation_input,

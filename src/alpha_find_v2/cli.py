@@ -66,6 +66,11 @@ from .portfolio_promotion_replay import (
     PortfolioPromotionReplay,
     PortfolioPromotionReplayResult,
 )
+from .portfolio_backtester import (
+    load_portfolio_backtest_case,
+    run_loaded_portfolio_backtest,
+    write_portfolio_backtest_artifact,
+)
 from .research_artifact_loader import (
     load_sleeve_artifact_build_case,
     load_portfolio_promotion_replay_case,
@@ -537,6 +542,16 @@ def _parse_args() -> argparse.Namespace:
         help="Path to the replay-case TOML file.",
     )
 
+    run_portfolio_backtest = subparsers.add_parser(
+        "run-portfolio-backtest",
+        help="Run a daily portfolio-level backtest case from persisted research artifacts.",
+    )
+    run_portfolio_backtest.add_argument(
+        "--case",
+        default="research/examples/deployment_minimal/trend_live_candidate_portfolio_backtest.toml",
+        help="Path to the portfolio-backtest case TOML file.",
+    )
+
     build_executable_signal = subparsers.add_parser(
         "build-executable-signal",
         help="Build an executable signal package from a deployment case.",
@@ -983,6 +998,25 @@ def main() -> None:
                 "decision": asdict(result.decision) if result.decision is not None else None,
                 "snapshot": asdict(result.snapshot),
                 "research_evidence": _promotion_replay_research_evidence_payload(result),
+            }
+        )
+        return
+
+    if args.command == "run-portfolio-backtest":
+        loaded_case = load_portfolio_backtest_case(Path(args.case))
+        result = run_loaded_portfolio_backtest(loaded_case)
+        output_path = write_portfolio_backtest_artifact(
+            case_id=loaded_case.definition.case_id,
+            description=loaded_case.definition.description,
+            result=result,
+            path=loaded_case.definition.output_path,
+        )
+        _dump_json(
+            {
+                "case_id": loaded_case.definition.case_id,
+                "description": loaded_case.definition.description,
+                "output_path": str(output_path),
+                "summary": asdict(result.summary) if result.summary is not None else None,
             }
         )
         return

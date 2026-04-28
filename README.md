@@ -110,6 +110,8 @@ PYTHONPATH=src python -m alpha_find_v2 build-trend-research-input --case researc
 PYTHONPATH=src python -m alpha_find_v2 build-sleeve-artifact --case research/examples/artifact_build_minimal/trend_leadership_core_output.toml
 PYTHONPATH=src python -m alpha_find_v2 build-sleeve-artifact --case research/examples/artifact_build_minimal/trend_resilience_core_output.toml
 PYTHONPATH=src python -m alpha_find_v2 run-promotion-replay --case research/examples/promotion_replay_real_output/replay_case.toml
+PYTHONPATH=src python -m alpha_find_v2 run-portfolio-backtest --case research/examples/deployment_minimal/trend_only_portfolio_backtest.toml
+PYTHONPATH=src python -m alpha_find_v2 run-portfolio-backtest --case research/examples/deployment_minimal/trend_live_candidate_portfolio_backtest.toml
 PYTHONPATH=src python -m alpha_find_v2 build-executable-signal --case research/examples/deployment_minimal/executable_signal_real_output_case.toml
 PYTHONPATH=src python -m alpha_find_v2 build-sleeve-artifact --case research/examples/artifact_build_minimal/fundamental_rerating_core.toml
 PYTHONPATH=src python -m alpha_find_v2 build-sleeve-artifact --case research/examples/artifact_build_minimal/trend_leadership_core.toml
@@ -138,6 +140,13 @@ Note:
 - `research/examples/trend_input_build_minimal/trend_leadership_core.toml` now
   enables `cn_a_directional_open_lock`, so generated trend artifacts stop
   silently suppressing A-share open-limit trade blocks.
+- `run-promotion-replay` is a sleeve/portfolio candidate comparison tool. It
+  compounds artifact forward returns and is not a real tradeable equity curve.
+- `run-portfolio-backtest` is the daily portfolio-level proof lane before
+  shadow-live. It executes decision-date targets on the next trading day open,
+  uses `daily_bar_pit` adjusted OHLC columns as the research price basis for
+  fills and daily marks, records orders/fills and blocked/partial trades, and
+  ignores sleeve artifact `realized_return` for PnL.
 - Revalidated on `2026-04-27`, the staged CSI 800 + `sw2021_l1` benchmark
   constituent coverage now spans `2014-02-21` through `2026-04-23`.
   `output/audits/sw_industry_pit_audit_20140221_20260423.json` reports

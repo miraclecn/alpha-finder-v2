@@ -58,6 +58,21 @@ The replay loop is:
 
 `artifacts -> constructor -> simulator -> evaluator -> promotion gate`
 
+Promotion replay is not a live-equity proof. It uses the sleeve artifact's
+forward `realized_return` field on each replay step, so it is valid for
+comparing candidate sleeve allocations on a shared research calendar but not
+for proving an account-level historical equity curve.
+
+The real historical performance proof lane is:
+
+`artifacts -> constructor -> daily portfolio backtester -> ledger metrics`
+
+That daily backtester advances one market session at a time, executes the
+decision-close target on the next trading day open, uses the adjusted
+`daily_bar_pit` OHLC columns as the research price basis for fills and marks,
+keeps raw OHLC fields for A-share open-limit checks, and ignores artifact
+`realized_return` for PnL.
+
 For each decision date, the replay engine:
 
 1. reads the sleeve artifact snapshots required by the recipe

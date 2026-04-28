@@ -63,7 +63,7 @@ class PortfolioConstructor:
         )
 
     def _build_step(self, construction_input: PortfolioConstructionInput) -> PortfolioConstructionStep:
-        combined_weights: dict[str, float] = {}
+        weight_contributions: dict[str, list[float]] = {}
         metadata_by_asset: dict[str, PortfolioSecuritySignal] = {}
         asset_sleeves: dict[str, set[str]] = {}
 
@@ -83,12 +83,12 @@ class PortfolioConstructor:
                     metadata_by_asset.get(signal.asset_id),
                     signal,
                 )
-                combined_weights[signal.asset_id] = (
-                    combined_weights.get(signal.asset_id, 0.0)
-                    + signal.target_weight * scale
+                weight_contributions.setdefault(signal.asset_id, []).append(
+                    signal.target_weight * scale
                 )
                 asset_sleeves.setdefault(signal.asset_id, set()).add(sleeve_input.sleeve_id)
 
+        combined_weights = self._combine_weight_contributions(weight_contributions)
         overlap_names = sorted(
             asset_id for asset_id, sleeve_ids in asset_sleeves.items() if len(sleeve_ids) > 1
         )
@@ -137,6 +137,28 @@ class PortfolioConstructor:
             if signal.target_weight > 0.0:
                 positive.append(signal)
         return positive
+
+    def _combine_weight_contributions(
+        self,
+        weight_contributions: dict[str, list[float]],
+    ) -> dict[str, float]:
+        overlap_mode = self.construction_model.overlap_mode
+        if overlap_mode == "sum":
+            return {
+                asset_id: sum(contributions)
+                for asset_id, contributions in weight_contributions.items()
+            }
+        if overlap_mode == "max":
+            return {
+                asset_id: max(contributions)
+                for asset_id, contributions in weight_contributions.items()
+            }
+        if overlap_mode == "average":
+            return {
+                asset_id: sum(contributions) / len(contributions)
+                for asset_id, contributions in weight_contributions.items()
+            }
+        raise ValueError(f"Unsupported portfolio construction overlap_mode: {overlap_mode}")
 
     def _apply_name_selection(
         self,

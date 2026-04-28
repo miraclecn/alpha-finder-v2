@@ -10,6 +10,118 @@ from alpha_find_v2.portfolio_simulator import PortfolioSecuritySignal, TradeCons
 
 
 class PortfolioConstructorTest(unittest.TestCase):
+    def _mandate(self) -> Mandate:
+        return Mandate(
+            id="test_mandate",
+            name="Test Mandate",
+            market="CN-A",
+            benchmark="CSI 800",
+            account_type="cash_equity",
+            description="Test mandate for constructor behavior.",
+            max_single_name_weight=1.0,
+            risk={"max_industry_overweight": 1.0},
+        )
+
+    def _portfolio(self) -> PortfolioRecipe:
+        return PortfolioRecipe(
+            id="test_portfolio",
+            name="Test Portfolio",
+            mandate_id="test_mandate",
+            benchmark="CSI 800",
+            rebalance_policy="weekly",
+            description="Test multi-sleeve blend.",
+            construction_model_id="test_blend",
+            sleeves=["slow", "event"],
+            allocation={"slow": 0.60, "event": 0.40},
+            constraints={"max_names": 10, "max_single_name_weight": 1.0},
+        )
+
+    def _construction_model(self, overlap_mode: str) -> PortfolioConstructionModel:
+        return PortfolioConstructionModel(
+            id="test_blend",
+            name="Test Blend",
+            description="Budgeted combiner.",
+            sleeve_weight_source="portfolio_allocation",
+            overlap_mode=overlap_mode,
+            name_selection="top_weight",
+            excess_weight_policy="hold_cash",
+            industry_budget_mode="",
+        )
+
+    def _overlap_result(self, overlap_mode: str):
+        constructor = PortfolioConstructor(
+            mandate=self._mandate(),
+            portfolio=self._portfolio(),
+            construction_model=self._construction_model(overlap_mode),
+        )
+        return constructor.build(
+            [
+                PortfolioConstructionInput(
+                    trade_date="2026-04-06",
+                    sleeves=[
+                        SleeveConstructionInput(
+                            sleeve_id="slow",
+                            signals=[
+                                PortfolioSecuritySignal(
+                                    asset_id="AAA",
+                                    target_weight=0.50,
+                                    realized_return=0.0100,
+                                    industry="bank",
+                                ),
+                                PortfolioSecuritySignal(
+                                    asset_id="BBB",
+                                    target_weight=0.50,
+                                    realized_return=0.0200,
+                                    industry="tech",
+                                ),
+                            ],
+                        ),
+                        SleeveConstructionInput(
+                            sleeve_id="event",
+                            signals=[
+                                PortfolioSecuritySignal(
+                                    asset_id="AAA",
+                                    target_weight=0.50,
+                                    realized_return=0.0100,
+                                    industry="bank",
+                                ),
+                                PortfolioSecuritySignal(
+                                    asset_id="CCC",
+                                    target_weight=0.50,
+                                    realized_return=0.0300,
+                                    industry="tech",
+                                ),
+                            ],
+                        ),
+                    ],
+                )
+            ]
+        )
+
+    def test_overlap_mode_sum_preserves_existing_weight_addition(self) -> None:
+        step = self._overlap_result("sum").steps[0]
+
+        self.assertEqual(step.overlap_names, ["AAA"])
+        self.assertAlmostEqual(step.combined_weights["AAA"], 0.50)
+        self.assertAlmostEqual(step.combined_weights["BBB"], 0.30)
+        self.assertAlmostEqual(step.combined_weights["CCC"], 0.20)
+
+    def test_overlap_mode_max_uses_largest_sleeve_contribution(self) -> None:
+        step = self._overlap_result("max").steps[0]
+
+        self.assertEqual(step.overlap_names, ["AAA"])
+        self.assertAlmostEqual(step.combined_weights["AAA"], 0.30)
+        self.assertAlmostEqual(step.combined_weights["BBB"], 0.30)
+        self.assertAlmostEqual(step.combined_weights["CCC"], 0.20)
+
+    def test_overlap_mode_average_uses_mean_sleeve_contribution(self) -> None:
+        step = self._overlap_result("average").steps[0]
+
+        self.assertEqual(step.overlap_names, ["AAA"])
+        self.assertAlmostEqual(step.combined_weights["AAA"], 0.25)
+        self.assertAlmostEqual(step.combined_weights["BBB"], 0.30)
+        self.assertAlmostEqual(step.combined_weights["CCC"], 0.20)
+
     def test_constructor_combines_overlap_and_holds_cash_after_caps(self) -> None:
         mandate = Mandate(
             id="test_mandate",

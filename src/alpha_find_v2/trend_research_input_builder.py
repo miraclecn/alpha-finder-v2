@@ -50,6 +50,7 @@ class TrendResearchInputBuildCaseDefinition:
     lookback_days: int = 60
     short_window_days: int = 20
     turnover_window_days: int = 20
+    turnover_baseline_window_days: int = 120
     rebalance_stride: int = 5
     industry_label_source: str = "omit"
     industry_schema: str = ""
@@ -85,6 +86,9 @@ class TrendResearchInputBuildCaseDefinition:
             lookback_days=int(data.get("lookback_days", 60)),
             short_window_days=int(data.get("short_window_days", 20)),
             turnover_window_days=int(data.get("turnover_window_days", 20)),
+            turnover_baseline_window_days=int(
+                data.get("turnover_baseline_window_days", 120)
+            ),
             rebalance_stride=int(data.get("rebalance_stride", 5)),
             industry_label_source=str(data.get("industry_label_source", "omit")),
             industry_schema=str(data.get("industry_schema", "")),
@@ -134,6 +138,7 @@ class _CandidateRow:
     entry_open: float
     exit_open: float
     median_turnover_cny: float
+    turnover_baseline_cny: float | None
     entry_suspended: bool
     exit_suspended: bool
     entry_liquidity_pass: bool
@@ -163,6 +168,12 @@ def load_trend_research_input_build_case(
         raise ValueError("Trend research input build case rebalance_stride must be positive.")
     if definition.lookback_days < definition.short_window_days:
         raise ValueError("Trend research input build case lookback_days must cover short_window_days.")
+    if definition.turnover_window_days <= 0:
+        raise ValueError("Trend research input build case turnover_window_days must be positive.")
+    if definition.turnover_baseline_window_days <= 0:
+        raise ValueError(
+            "Trend research input build case turnover_baseline_window_days must be positive."
+        )
     if definition.industry_label_source not in SUPPORTED_INDUSTRY_LABEL_SOURCES:
         raise ValueError(
             "Trend research input builder currently supports only "
@@ -249,7 +260,10 @@ def build_trend_research_observation_input(
         calendar=calendar,
         start_date=loaded_case.definition.start_date,
         end_date=loaded_case.definition.end_date,
-        lookback_days=loaded_case.definition.lookback_days,
+        lookback_days=max(
+            loaded_case.definition.lookback_days,
+            loaded_case.definition.turnover_baseline_window_days,
+        ),
         horizon_days=loaded_case.holding_horizon_days,
         rebalance_stride=loaded_case.definition.rebalance_stride,
     )
@@ -262,6 +276,7 @@ def build_trend_research_observation_input(
         short_window_days=loaded_case.definition.short_window_days,
         lookback_days=loaded_case.definition.lookback_days,
         turnover_window_days=loaded_case.definition.turnover_window_days,
+        turnover_baseline_window_days=loaded_case.definition.turnover_baseline_window_days,
         horizon_days=loaded_case.holding_horizon_days,
         min_turnover_cny_mn=loaded_case.min_turnover_cny_mn,
         min_listing_days=loaded_case.definition.min_listing_days,
@@ -575,6 +590,7 @@ def _load_candidate_rows(
     short_window_days: int,
     lookback_days: int,
     turnover_window_days: int,
+    turnover_baseline_window_days: int,
     horizon_days: int,
     min_turnover_cny_mn: float,
     min_listing_days: int,
@@ -605,7 +621,12 @@ def _load_candidate_rows(
                         PARTITION BY d.security_id
                         ORDER BY d.trade_date
                         ROWS BETWEEN ? PRECEDING AND CURRENT ROW
-                    ) AS median_turnover_cny
+                    ) AS median_turnover_cny,
+                    quantile_cont(d.turnover_value_cny, 0.5) OVER (
+                        PARTITION BY d.security_id
+                        ORDER BY d.trade_date
+                        ROWS BETWEEN ? PRECEDING AND 1 PRECEDING
+                    ) AS turnover_baseline_cny
                 FROM daily_bar_pit AS d
                 INNER JOIN security_master_ref AS s
                     ON s.security_id = d.security_id
@@ -651,6 +672,7 @@ def _load_candidate_rows(
                 is_st,
                 board,
                 median_turnover_cny,
+                turnover_baseline_cny,
                 exit_median_turnover_cny,
                 ret_short,
                 ret_long,
@@ -662,6 +684,7 @@ def _load_candidate_rows(
                 short_window_days,
                 lookback_days,
                 turnover_window_days - 1,
+                turnover_baseline_window_days,
                 lower_bound,
                 upper_bound,
                 short_window_days - 1,
@@ -682,6 +705,7 @@ def _load_candidate_rows(
             is_st,
             board,
             median_turnover_cny,
+            turnover_baseline_cny,
             exit_median_turnover_cny,
             ret_short,
             ret_long,
@@ -715,6 +739,11 @@ def _load_candidate_rows(
                 "list_date": str(list_date),
                 "board": str(board),
                 "median_turnover_cny": float(median_turnover_cny),
+                "turnover_baseline_cny": (
+                    None
+                    if turnover_baseline_cny is None
+                    else float(turnover_baseline_cny)
+                ),
                 "exit_liquidity_pass": bool(
                     exit_median_turnover_cny is not None
                     and float(exit_median_turnover_cny) >= min_turnover_cny
@@ -785,6 +814,11 @@ def _load_candidate_rows(
                 entry_open=entry_effective_open,
                 exit_open=exit_effective_open,
                 median_turnover_cny=float(candidate_input["median_turnover_cny"]),
+                turnover_baseline_cny=(
+                    None
+                    if candidate_input["turnover_baseline_cny"] is None
+                    else float(candidate_input["turnover_baseline_cny"])
+                ),
                 entry_suspended=entry_suspended,
                 exit_suspended=exit_suspended,
                 entry_liquidity_pass=True,
@@ -956,9 +990,7 @@ def _score_candidates(
                 if candidate.short_return_vol and candidate.short_return_vol > 0.0
                 else 0.0
             ),
-            "turnover_confirmation": math.log(
-                max(candidate.median_turnover_cny / 1_000_000.0, 1.0)
-            ),
+            "turnover_confirmation": _turnover_confirmation(candidate),
         }
         for candidate in candidates
     }
@@ -986,6 +1018,15 @@ def _score_candidates(
         scored,
         key=lambda item: (-float(item["score"]), str(item["candidate"].security_id)),
     )
+
+
+def _turnover_confirmation(candidate: _CandidateRow) -> float:
+    if candidate.ret_short <= 0.0:
+        return 0.0
+    if candidate.turnover_baseline_cny is None or candidate.turnover_baseline_cny <= 0.0:
+        return 0.0
+    turnover_ratio = candidate.median_turnover_cny / candidate.turnover_baseline_cny
+    return math.log(max(turnover_ratio, 1.0))
 
 
 def _descriptor_weights(descriptor_set) -> dict[str, float]:

@@ -15,6 +15,8 @@ It binds:
   `research/examples/deployment_minimal/trend_leadership_multi_year_validation_audit_v1.toml`
 - multi-year validation audit:
   `research/examples/deployment_minimal/trend_leadership_multi_year_validation_audit_v1.json`
+- daily portfolio-level backtest case:
+  `research/examples/deployment_minimal/trend_live_candidate_portfolio_backtest.toml`
 - paper-trade signal policy:
   `docs/operations/trend-leadership-paper-trade-signal-policy.md`
 
@@ -38,6 +40,10 @@ Current admission state:
 - not eligible for small-capital probation yet
 - eligible to build the gated paper-trade signal package because the multi-year
   validation audit gate now passes
+- before shadow-live, historical performance must be evidenced with
+  `run-portfolio-backtest`, using adjusted daily OHLC prices for fills and
+  marks; `run-promotion-replay` remains a candidate comparison and
+  promotion-gate tool, not a real equity curve
 
 Current blockers that remain explicit:
 
