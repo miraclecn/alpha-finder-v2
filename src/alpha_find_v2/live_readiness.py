@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import date
 import json
 from pathlib import Path
@@ -157,6 +157,7 @@ class MultiYearValidationAuditBuildCaseDefinition:
     trend_research_input_build_case_path: str
     output_path: str
     replay_case_path: str = ""
+    portfolio_backtest_result_path: str = ""
     minimum_calendar_years: float = 5.0
     as_of_date: str = ""
     notes: list[str] = field(default_factory=list)
@@ -185,6 +186,9 @@ class MultiYearValidationAuditBuildCaseDefinition:
             ),
             output_path=str(data["output_path"]),
             replay_case_path=str(data.get("replay_case_path", "")),
+            portfolio_backtest_result_path=str(
+                data.get("portfolio_backtest_result_path", "")
+            ),
             minimum_calendar_years=float(data.get("minimum_calendar_years", 5.0)),
             as_of_date=str(data.get("as_of_date", "")),
             notes=[str(item) for item in data.get("notes", [])],
@@ -283,6 +287,14 @@ class MultiYearValidationAuditDefinition:
     portfolio_evidence_complete: bool
     tradeability: TradeabilityAuditDefinition
     market_state_coverage: MarketStateCoverageDefinition
+    corporate_action_exception_exposure_count: int = 0
+    corporate_action_exception_exposures: list[JsonMap] = field(default_factory=list)
+    qfq_fallback_price_exposure_count: int = 0
+    tradeability_fallback_exposure_count: int = 0
+    market_data_fallback_exposure_count: int = 0
+    active_backtest_information_ratio: float | None = None
+    active_backtest_active_annualized_return: float | None = None
+    active_backtest_tracking_error: float | None = None
     notes: list[str] = field(default_factory=list)
 
     @classmethod
@@ -320,6 +332,35 @@ class MultiYearValidationAuditDefinition:
             market_state_coverage=MarketStateCoverageDefinition.from_json(
                 dict(data.get("market_state_coverage", {}))
             ),
+            corporate_action_exception_exposure_count=int(
+                data.get("corporate_action_exception_exposure_count", 0)
+            ),
+            corporate_action_exception_exposures=[
+                dict(item)
+                for item in data.get("corporate_action_exception_exposures", [])
+            ],
+            qfq_fallback_price_exposure_count=int(
+                data.get("qfq_fallback_price_exposure_count", 0)
+            ),
+            tradeability_fallback_exposure_count=int(
+                data.get("tradeability_fallback_exposure_count", 0)
+            ),
+            market_data_fallback_exposure_count=int(
+                data.get(
+                    "market_data_fallback_exposure_count",
+                    int(data.get("qfq_fallback_price_exposure_count", 0))
+                    + int(data.get("tradeability_fallback_exposure_count", 0)),
+                )
+            ),
+            active_backtest_information_ratio=_optional_float(
+                data.get("active_backtest_information_ratio")
+            ),
+            active_backtest_active_annualized_return=_optional_float(
+                data.get("active_backtest_active_annualized_return")
+            ),
+            active_backtest_tracking_error=_optional_float(
+                data.get("active_backtest_tracking_error")
+            ),
             notes=[str(item) for item in data.get("notes", [])],
         )
 
@@ -330,6 +371,11 @@ class MultiYearValidationAuditSummary:
     minimum_calendar_years: float = 0.0
     failed_tradeability_checks: list[str] = field(default_factory=list)
     missing_market_states: list[str] = field(default_factory=list)
+    corporate_action_exception_exposure_count: int = 0
+    qfq_fallback_price_exposure_count: int = 0
+    tradeability_fallback_exposure_count: int = 0
+    market_data_fallback_exposure_count: int = 0
+    active_backtest_information_ratio: float | None = None
     blockers: list[str] = field(default_factory=list)
     signal_release_gate_met: bool = False
 
@@ -543,6 +589,19 @@ def evaluate_multi_year_validation_audit(
         minimum_calendar_years=definition.minimum_calendar_years,
         failed_tradeability_checks=definition.tradeability.failed_checks(),
         missing_market_states=definition.market_state_coverage.missing_states(),
+        corporate_action_exception_exposure_count=(
+            definition.corporate_action_exception_exposure_count
+        ),
+        qfq_fallback_price_exposure_count=(
+            definition.qfq_fallback_price_exposure_count
+        ),
+        tradeability_fallback_exposure_count=(
+            definition.tradeability_fallback_exposure_count
+        ),
+        market_data_fallback_exposure_count=(
+            definition.market_data_fallback_exposure_count
+        ),
+        active_backtest_information_ratio=definition.active_backtest_information_ratio,
     )
     if summary.calendar_years_covered < definition.minimum_calendar_years:
         summary.blockers.append("minimum_history_years")
@@ -560,6 +619,14 @@ def evaluate_multi_year_validation_audit(
         summary.blockers.append("regime_split")
     if not definition.portfolio_evidence_complete:
         summary.blockers.append("portfolio_evidence")
+    if definition.active_backtest_information_ratio is None:
+        summary.blockers.append("active_backtest_ir")
+    if definition.corporate_action_exception_exposure_count > 0:
+        summary.blockers.append("corporate_action_exception_exposure")
+    if definition.qfq_fallback_price_exposure_count > 0:
+        summary.blockers.append("qfq_fallback_price_exposure")
+    if definition.tradeability_fallback_exposure_count > 0:
+        summary.blockers.append("tradeability_fallback_exposure")
     summary.signal_release_gate_met = not summary.blockers
     return EvaluatedMultiYearValidationAudit(
         definition=definition,
@@ -582,6 +649,14 @@ def build_multi_year_validation_audit(
     regime_split_complete = False
     portfolio_evidence_complete = False
     market_state_coverage = MarketStateCoverageDefinition()
+    corporate_action_exception_exposures: list[JsonMap] = []
+    corporate_action_exception_exposure_count = 0
+    qfq_fallback_price_exposure_count = 0
+    tradeability_fallback_exposure_count = 0
+    market_data_fallback_exposure_count = 0
+    active_backtest_information_ratio: float | None = None
+    active_backtest_active_annualized_return: float | None = None
+    active_backtest_tracking_error: float | None = None
     auto_notes = list(loaded_case.definition.notes)
 
     if loaded_case.replay_case is not None:
@@ -606,24 +681,89 @@ def build_multi_year_validation_audit(
             and replay_result.regime_breakdown.stability.bucket_count > 0
         )
         market_state_coverage = _replay_market_state_coverage(replay_result)
+        if replay_result.market_data_quality is not None:
+            corporate_action_exception_exposures = [
+                asdict(item)
+                for item in (
+                    replay_result.market_data_quality.corporate_action_exception_exposures
+                )
+            ]
+            corporate_action_exception_exposure_count = len(
+                corporate_action_exception_exposures
+            )
         if loaded_case.portfolio.regime_overlay_id:
             portfolio_evidence_complete = (
                 replay_result.regime_overlay is not None
                 and len(replay_result.regime_overlay.decisions)
                 == len(replay_result.candidate_simulation.steps)
+                and replay_result.regime_overlay.application_mode == "both_portfolios"
             )
             if not portfolio_evidence_complete:
                 auto_notes.append(
                     "Portfolio-level replay evidence remains incomplete because "
                     "regime_overlay decisions are missing for one or more replay "
-                    "trade dates."
+                    "trade dates or the overlay was not applied to both baseline "
+                    "and candidate portfolios."
                 )
         else:
             portfolio_evidence_complete = True
+        if corporate_action_exception_exposure_count > 0:
+            portfolio_evidence_complete = False
+            auto_notes.append(
+                "Portfolio-level replay evidence crosses corporate-action exception "
+                "windows; exclude these exposures or resolve them with an official "
+                "source-backed rule before signal release."
+            )
     else:
         auto_notes.append(
             "No replay case is attached; anchored walk-forward, regime split, and "
             "portfolio-level evidence remain incomplete."
+        )
+
+    if loaded_case.definition.portfolio_backtest_result_path.strip():
+        backtest_quality = _load_portfolio_backtest_quality_evidence(
+            loaded_case.definition.portfolio_backtest_result_path
+        )
+        corporate_action_exception_exposures.extend(
+            backtest_quality["corporate_action_exception_exposures"]
+        )
+        corporate_action_exception_exposure_count += int(
+            backtest_quality["corporate_action_exception_exposure_count"]
+        )
+        qfq_fallback_price_exposure_count = int(
+            backtest_quality["qfq_fallback_price_exposure_count"]
+        )
+        tradeability_fallback_exposure_count = int(
+            backtest_quality["tradeability_fallback_exposure_count"]
+        )
+        market_data_fallback_exposure_count = int(
+            backtest_quality["market_data_fallback_exposure_count"]
+        )
+        active_backtest_information_ratio = backtest_quality[
+            "active_backtest_information_ratio"
+        ]
+        active_backtest_active_annualized_return = backtest_quality[
+            "active_backtest_active_annualized_return"
+        ]
+        active_backtest_tracking_error = backtest_quality[
+            "active_backtest_tracking_error"
+        ]
+        if (
+            int(backtest_quality["corporate_action_exception_exposure_count"]) > 0
+            or qfq_fallback_price_exposure_count > 0
+            or tradeability_fallback_exposure_count > 0
+        ):
+            portfolio_evidence_complete = False
+            auto_notes.append(
+                "Portfolio backtest evidence uses promotion-blocking market-data "
+                "fallback or corporate-action exception windows; rebuild on clean "
+                "raw-OHLC and official tradeability evidence before signal release."
+            )
+    if active_backtest_information_ratio is None:
+        portfolio_evidence_complete = False
+        auto_notes.append(
+            "Live-ready promotion requires benchmark-relative portfolio backtest "
+            "information_ratio evidence; research replay IR alone is not sufficient."
         )
 
     normalized_dates = [_normalize_trade_date(value) for value in validation_dates]
@@ -665,6 +805,18 @@ def build_multi_year_validation_audit(
         portfolio_evidence_complete=portfolio_evidence_complete,
         tradeability=_tradeability_audit(loaded_case),
         market_state_coverage=market_state_coverage,
+        corporate_action_exception_exposure_count=(
+            corporate_action_exception_exposure_count
+        ),
+        corporate_action_exception_exposures=corporate_action_exception_exposures,
+        qfq_fallback_price_exposure_count=qfq_fallback_price_exposure_count,
+        tradeability_fallback_exposure_count=tradeability_fallback_exposure_count,
+        market_data_fallback_exposure_count=market_data_fallback_exposure_count,
+        active_backtest_information_ratio=active_backtest_information_ratio,
+        active_backtest_active_annualized_return=(
+            active_backtest_active_annualized_return
+        ),
+        active_backtest_tracking_error=active_backtest_tracking_error,
         notes=auto_notes,
     )
 
@@ -702,12 +854,76 @@ def write_multi_year_validation_audit(
             "broad_trend": definition.market_state_coverage.broad_trend,
             "fragile_leadership": definition.market_state_coverage.fragile_leadership,
         },
+        "corporate_action_exception_exposure_count": (
+            definition.corporate_action_exception_exposure_count
+        ),
+        "corporate_action_exception_exposures": list(
+            definition.corporate_action_exception_exposures
+        ),
+        "qfq_fallback_price_exposure_count": (
+            definition.qfq_fallback_price_exposure_count
+        ),
+        "tradeability_fallback_exposure_count": (
+            definition.tradeability_fallback_exposure_count
+        ),
+        "market_data_fallback_exposure_count": (
+            definition.market_data_fallback_exposure_count
+        ),
+        "active_backtest_information_ratio": definition.active_backtest_information_ratio,
+        "active_backtest_active_annualized_return": (
+            definition.active_backtest_active_annualized_return
+        ),
+        "active_backtest_tracking_error": definition.active_backtest_tracking_error,
         "notes": list(definition.notes),
     }
     with target.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=False, indent=2)
         handle.write("\n")
     return target
+
+
+def _load_portfolio_backtest_quality_evidence(path: Path | str) -> JsonMap:
+    payload = _read_json(path)
+    if str(payload.get("artifact_type", "")) != "portfolio_backtest_result":
+        raise ValueError(
+            "Multi-year validation audit portfolio_backtest_result_path must "
+            "point to a portfolio_backtest_result artifact."
+        )
+    artifact = dict(payload.get("artifact", {}))
+    summary = dict(artifact.get("summary", {}) or {})
+    diagnostics = dict(artifact.get("diagnostics", {}) or {})
+    qfq_count = int(summary.get("qfq_fallback_price_exposure_count", 0) or 0)
+    tradeability_count = int(
+        summary.get("tradeability_fallback_exposure_count", 0) or 0
+    )
+    market_data_count = int(
+        summary.get(
+            "market_data_fallback_exposure_count",
+            qfq_count + tradeability_count,
+        )
+        or 0
+    )
+    return {
+        "corporate_action_exception_exposure_count": int(
+            summary.get("corporate_action_exception_exposure_count", 0) or 0
+        ),
+        "corporate_action_exception_exposures": [
+            dict(item)
+            for item in diagnostics.get("corporate_action_exception_exposures", [])
+        ],
+        "qfq_fallback_price_exposure_count": qfq_count,
+        "tradeability_fallback_exposure_count": tradeability_count,
+        "market_data_fallback_exposure_count": market_data_count,
+        "active_backtest_information_ratio": _optional_float(
+            summary.get("information_ratio")
+        ),
+        "active_backtest_active_annualized_return": _optional_float(
+            summary.get("active_annualized_return")
+        ),
+        "active_backtest_tracking_error": _optional_float(
+            summary.get("tracking_error")
+        ),
+    }
 
 
 def _validate_live_candidate_bundle(
@@ -1148,6 +1364,12 @@ def _candidate_drawdown_series(returns: list[float]) -> list[float]:
         peak = max(peak, equity)
         drawdowns.append(1.0 - (equity / peak))
     return drawdowns
+
+
+def _optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    return float(value)
 
 
 def _normalize_trade_date(value: str) -> str:

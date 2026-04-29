@@ -11,9 +11,14 @@ class SleevePromotionSnapshot:
     oos_tstat: float
     breadth: int
     peak_to_trough_drawdown: float
+    research_ir: float = 0.0
+    research_tstat: float = 0.0
+    metric_basis: str = "artifact_period_absolute_net_return"
     turnover_budget: float = 0.0
     cost_scenario_pass: dict[str, bool] = field(default_factory=dict)
     regime_pass: dict[str, bool] = field(default_factory=dict)
+    cost_scenario_evidence_basis: dict[str, str] = field(default_factory=dict)
+    regime_evidence_basis: dict[str, str] = field(default_factory=dict)
     max_component_correlation: float = 0.0
     correlation_to_existing_portfolio: float = 0.0
     realized_turnover_vs_budget: float = 0.0
@@ -24,6 +29,7 @@ class SleevePromotionSnapshot:
     regime_overlay_blocked_periods: int = 0
     regime_overlay_missing_inputs: list[str] = field(default_factory=list)
     regime_overlay_invalid_inputs: list[str] = field(default_factory=list)
+    overlay_application_mode: str = ""
 
 
 @dataclass(slots=True)
@@ -133,6 +139,8 @@ class PortfolioPromotionGateEvaluator:
                 failed.append("max_marginal_drawdown_increase")
 
         if snapshot.regime_overlay_id:
+            if snapshot.overlay_application_mode == "candidate_only":
+                failed.append("candidate_only_overlay_application")
             if snapshot.regime_overlay_blocked_periods > 0:
                 failed.append("regime_overlay_blocked")
             elif not snapshot.regime_overlay_missing_inputs and not snapshot.regime_overlay_invalid_inputs:

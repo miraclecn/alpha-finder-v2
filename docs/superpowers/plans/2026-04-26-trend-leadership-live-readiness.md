@@ -125,7 +125,11 @@ Beijing-board names are excluded from the live-tradable trend input because the
 account will not trade them, and `302132.SZ` is covered by a narrow
 `security_code_alias_backfill` from legacy `300114.SZ` industry intervals. The
 rebuilt audit spans `2021-03-05` through `2026-03-19`, covers `5.0404`
-calendar years after the T+20 exit horizon, and reports no blockers.
+calendar years after the T+20 exit horizon. As of the later 2026-04-29
+portfolio-evidence hardening, generated trend inputs quarantine both
+corporate-action exception windows and qfq-fallback windows; the attached daily
+backtest reports zero corporate-action-exception, qfq-fallback, and
+tradeability-fallback portfolio exposures.
 
 Stop if the widened history depends on:
 

@@ -51,6 +51,7 @@ from .live_state import (
     load_benchmark_state_artifact,
 )
 from .market_data_bootstrap import build_research_source_db
+from .market_data_quality import write_market_data_quality_audit
 from .benchmark_state_builder import (
     build_benchmark_state_artifact,
     load_benchmark_state_build_case,
@@ -58,7 +59,9 @@ from .benchmark_state_builder import (
 )
 from .reference_data_staging import (
     BenchmarkReferenceDefinition,
+    MARKET_EVENT_TABLES,
     build_tushare_reference_db,
+    refresh_tushare_market_event_tables,
     refresh_official_sw_industry_reference_db,
 )
 from .portfolio_constructor import PortfolioConstructor
@@ -111,6 +114,11 @@ def _promotion_replay_research_evidence_payload(
         "candidate_summary": asdict(result.candidate_summary),
         "marginal": asdict(result.marginal),
         "diagnostics": asdict(result.diagnostics),
+        "market_data_quality": (
+            asdict(result.market_data_quality)
+            if result.market_data_quality is not None
+            else None
+        ),
         "regime_overlay": (
             asdict(result.regime_overlay)
             if result.regime_overlay is not None
@@ -349,12 +357,27 @@ def _parse_args() -> argparse.Namespace:
     build_research_source_db_cmd.add_argument(
         "--supplemental-db",
         default="",
-        help="Optional DuckDB containing audited PIT reference tables such as industry_classification_pit, benchmark_membership_pit, and benchmark_weight_snapshot_pit.",
+        help="Optional DuckDB containing audited PIT reference and market-event staging tables.",
+    )
+
+    audit_market_data_quality = subparsers.add_parser(
+        "audit-market-data-quality",
+        help="Write a JSON quality audit for a V2 research-source DuckDB.",
+    )
+    audit_market_data_quality.add_argument(
+        "--source-db",
+        default="output/research_source.duckdb",
+        help="Path to the V2 research-source DuckDB file to audit.",
+    )
+    audit_market_data_quality.add_argument(
+        "--output",
+        default=f"output/audits/market_data_quality_{date.today().strftime('%Y%m%d')}.json",
+        help="Path to write the market-data quality JSON audit.",
     )
 
     build_reference_staging_db = subparsers.add_parser(
         "build-reference-staging-db",
-        help="Build a supplemental DuckDB of PIT benchmark and industry reference tables from Tushare.",
+        help="Build a supplemental DuckDB of PIT benchmark, industry, corporate-action, and tradeability staging tables from Tushare.",
     )
     build_reference_staging_db.add_argument(
         "--target-db",
@@ -391,6 +414,80 @@ def _parse_args() -> argparse.Namespace:
         help="Month window size used to chunk index_weight requests and avoid Tushare truncation.",
     )
     build_reference_staging_db.add_argument(
+        "--market-event-start-date",
+        default="",
+        help=(
+            "Earliest date for Tushare market-event interfaces in YYYYMMDD format. "
+            "Defaults to --start-date."
+        ),
+    )
+    build_reference_staging_db.add_argument(
+        "--market-event-end-date",
+        default="",
+        help=(
+            "Latest date for Tushare market-event interfaces in YYYYMMDD format. "
+            "Defaults to --end-date."
+        ),
+    )
+    build_reference_staging_db.add_argument(
+        "--token",
+        default="",
+        help="Optional explicit Tushare token. Falls back to TUSHARE_TOKEN or the legacy collector .env.",
+    )
+
+    refresh_reference_market_events = subparsers.add_parser(
+        "refresh-reference-market-events",
+        help="Refresh only raw Tushare market-event tables in an existing PIT reference DuckDB.",
+    )
+    refresh_reference_market_events.add_argument(
+        "--target-db",
+        default="output/pit_reference_staging.duckdb",
+        help="Path to the supplemental DuckDB file to update.",
+    )
+    refresh_reference_market_events.add_argument(
+        "--start-date",
+        required=True,
+        help="Earliest market-event date to request from Tushare in YYYYMMDD format.",
+    )
+    refresh_reference_market_events.add_argument(
+        "--end-date",
+        required=True,
+        help="Latest market-event date to request from Tushare in YYYYMMDD format.",
+    )
+    refresh_reference_market_events.add_argument(
+        "--market-event-page-size",
+        type=int,
+        default=2000,
+        help="Page size used for Tushare market-event requests.",
+    )
+    refresh_reference_market_events.add_argument(
+        "--mode",
+        choices=["replace", "append"],
+        default="replace",
+        help="Use replace for one-shot refreshes or append for recoverable historical batches.",
+    )
+    refresh_reference_market_events.add_argument(
+        "--event",
+        action="append",
+        choices=list(MARKET_EVENT_TABLES),
+        default=[],
+        help=(
+            "Raw market-event table to refresh. Repeat for multiple tables. "
+            "Defaults to all event tables."
+        ),
+    )
+    refresh_reference_market_events.add_argument(
+        "--request-interval-seconds",
+        type=float,
+        default=0.0,
+        help="Optional sleep after each Tushare market-event request for API rate limits.",
+    )
+    refresh_reference_market_events.add_argument(
+        "--skip-append-deduplicate",
+        action="store_true",
+        help="Skip full-table deduplication after append when the requested date window is known not to overlap existing staged rows.",
+    )
+    refresh_reference_market_events.add_argument(
         "--token",
         default="",
         help="Optional explicit Tushare token. Falls back to TUSHARE_TOKEN or the legacy collector .env.",
@@ -798,6 +895,14 @@ def main() -> None:
         _dump_json(result)
         return
 
+    if args.command == "audit-market-data-quality":
+        result = write_market_data_quality_audit(
+            source_db=Path(args.source_db),
+            output_path=Path(args.output),
+        )
+        _dump_json(result)
+        return
+
     if args.command == "build-reference-staging-db":
         benchmark_values = args.benchmark or ["CSI 800=000906.SH"]
         benchmarks = [_parse_benchmark_reference(value) for value in benchmark_values]
@@ -811,6 +916,24 @@ def main() -> None:
             token=args.token or None,
             industry_levels=industry_levels,
             index_weight_window_months=args.index_weight_window_months,
+            stage_market_events=True,
+            market_event_start_date=args.market_event_start_date or None,
+            market_event_end_date=args.market_event_end_date or None,
+        )
+        _dump_json(result)
+        return
+
+    if args.command == "refresh-reference-market-events":
+        result = refresh_tushare_market_event_tables(
+            target_db=Path(args.target_db),
+            start_date=args.start_date,
+            end_date=args.end_date,
+            token=args.token or None,
+            market_event_page_size=args.market_event_page_size,
+            refresh_mode=args.mode,
+            market_event_tables=tuple(args.event) if args.event else None,
+            request_interval_seconds=args.request_interval_seconds,
+            deduplicate_on_append=not args.skip_append_deduplicate,
         )
         _dump_json(result)
         return

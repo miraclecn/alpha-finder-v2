@@ -406,6 +406,11 @@ class BenchmarkStateBuilderTest(unittest.TestCase):
                 ["20240102", "20240103", "20240104"],
             )
             self.assertEqual(
+                [step.snapshot_age_days for step in artifact.steps],
+                [0, 0, 1],
+            )
+            self.assertEqual(artifact.steps[2].provider_snapshot_date, "20240103")
+            self.assertEqual(
                 [
                     (item.asset_id, round(item.weight, 4), item.industry)
                     for item in artifact.steps[0].constituents

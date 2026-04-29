@@ -48,5 +48,7 @@ Its purpose is to prove the persisted replay spine, not to stand in for the fina
 The overlay variant is also intentionally minimal.
 It does not derive new market signals from partial artifacts.
 It only proves that V2 can load a first-class `regime_overlay`, map explicit
-green-input states into `normal / de_risk / cash_heavier`, and fail promotion
-when overlay inputs are incomplete.
+green-input states into `normal / de_risk / cash_heavier`, apply the overlay
+to both baseline and candidate portfolio paths before marginal comparison, and
+fail promotion when overlay inputs are incomplete. A `candidate_only` overlay
+application mode exists only for research experiments and is promotion-blocking.

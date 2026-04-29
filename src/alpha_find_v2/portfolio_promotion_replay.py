@@ -67,6 +67,42 @@ class SleeveSignalRecord:
 
 
 @dataclass(slots=True)
+class CorporateActionExceptionWindow:
+    exception_id: str
+    asset_id: str
+    previous_trade_date: str
+    trade_date: str
+    severity: str = ""
+    triage_class: str = ""
+    recommended_action: str = ""
+
+
+@dataclass(slots=True)
+class ReplayCorporateActionExceptionExposure:
+    exception_id: str
+    portfolio_id: str
+    asset_id: str
+    previous_trade_date: str
+    exception_trade_date: str
+    replay_trade_date: str
+    interval_end_trade_date: str
+    sleeve_ids: list[str] = field(default_factory=list)
+    severity: str = ""
+    triage_class: str = ""
+    recommended_action: str = ""
+
+
+@dataclass(slots=True)
+class ReplayMarketDataQualityEvidence:
+    market_data_quality_audit_path: str = ""
+    corporate_action_exception_window_count: int = 0
+    corporate_action_exception_exposures: list[
+        ReplayCorporateActionExceptionExposure
+    ] = field(default_factory=list)
+    promotion_blocked: bool = False
+
+
+@dataclass(slots=True)
 class SleeveResearchStep:
     trade_date: str
     records: list[SleeveSignalRecord] = field(default_factory=list)
@@ -105,6 +141,7 @@ class PortfolioPromotionReplayInput:
     regime_overlay_observations: list[RegimeOverlayObservationStep] = field(
         default_factory=list
     )
+    overlay_application_mode: str = "both_portfolios"
     periods_per_year: int = 52
     benchmark_industry_weights_by_date: dict[str, dict[str, float]] = field(default_factory=dict)
     cost_scenario_pass: dict[str, bool] = field(default_factory=dict)
@@ -115,6 +152,10 @@ class PortfolioPromotionReplayInput:
     walk_forward_splits: list["ReplayWalkForwardSplitDefinition"] = field(
         default_factory=list
     )
+    corporate_action_exception_windows: list[CorporateActionExceptionWindow] = field(
+        default_factory=list
+    )
+    market_data_quality_audit_path: str = ""
 
 
 @dataclass(slots=True)
@@ -256,6 +297,7 @@ class ReplayRegimeOverlayEvidence:
     summary: RegimeOverlaySummary = field(
         default_factory=lambda: RegimeOverlaySummary(overlay_id="")
     )
+    application_mode: str = "both_portfolios"
 
 
 @dataclass(slots=True)
@@ -273,6 +315,7 @@ class PortfolioPromotionReplayResult:
     walk_forward: ReplayWalkForwardEvidence | None = None
     regime_breakdown: ReplayRegimeEvidence | None = None
     regime_overlay: ReplayRegimeOverlayEvidence | None = None
+    market_data_quality: ReplayMarketDataQualityEvidence | None = None
 
 
 @dataclass(slots=True)
@@ -362,6 +405,33 @@ class PortfolioPromotionReplay:
             construction_model=self.construction_model,
         ).build(candidate_inputs)
 
+        regime_overlay_summary = None
+        regime_overlay_evidence = None
+        if replay_input.regime_overlay is not None:
+            if replay_input.overlay_application_mode not in {
+                "both_portfolios",
+                "candidate_only",
+            }:
+                raise ValueError(
+                    "Replay overlay_application_mode must be one of: "
+                    "both_portfolios, candidate_only"
+                )
+            regime_overlay_evidence = self._build_regime_overlay_evidence(
+                replay_input=replay_input,
+                trade_dates=trade_dates,
+            )
+            if replay_input.overlay_application_mode == "both_portfolios":
+                baseline_construction = self._construction_with_overlay_budget(
+                    construction=baseline_construction,
+                    overlay=replay_input.regime_overlay,
+                    decisions=regime_overlay_evidence.decisions,
+                )
+            candidate_construction = self._construction_with_overlay_budget(
+                construction=candidate_construction,
+                overlay=replay_input.regime_overlay,
+                decisions=regime_overlay_evidence.decisions,
+            )
+            regime_overlay_summary = regime_overlay_evidence.summary
         baseline_simulation = PortfolioSimulator(
             mandate=self.mandate,
             portfolio=replay_input.baseline_portfolio,
@@ -372,19 +442,6 @@ class PortfolioPromotionReplay:
             baseline_simulation,
             periods_per_year=replay_input.periods_per_year,
         )
-        regime_overlay_summary = None
-        regime_overlay_evidence = None
-        if replay_input.regime_overlay is not None:
-            regime_overlay_evidence = self._build_regime_overlay_evidence(
-                replay_input=replay_input,
-                trade_dates=trade_dates,
-            )
-            candidate_construction = self._construction_with_overlay_budget(
-                construction=candidate_construction,
-                overlay=replay_input.regime_overlay,
-                decisions=regime_overlay_evidence.decisions,
-            )
-            regime_overlay_summary = regime_overlay_evidence.summary
         candidate_simulation = PortfolioSimulator(
             mandate=self.mandate,
             portfolio=replay_input.candidate_portfolio,
@@ -409,6 +466,11 @@ class PortfolioPromotionReplay:
             baseline_simulation=baseline_simulation,
             candidate_simulation=candidate_simulation,
         )
+        market_data_quality = self._build_market_data_quality_evidence(
+            replay_input=replay_input,
+            artifacts_by_sleeve=artifacts_by_sleeve,
+            trade_dates=trade_dates,
+        )
         snapshot = self.evaluator.to_promotion_snapshot(
             summary=candidate_summary,
             turnover_budget=self._turnover_budget(replay_input),
@@ -419,10 +481,19 @@ class PortfolioPromotionReplay:
             marginal_ir_delta=marginal.marginal_ir_delta,
             marginal_drawdown_increase=marginal.marginal_drawdown_increase,
             regime_overlay_summary=regime_overlay_summary,
+            overlay_application_mode=(
+                replay_input.overlay_application_mode
+                if replay_input.regime_overlay is not None
+                else ""
+            ),
         )
         decision = None
         if self.gate_evaluator is not None:
             decision = self.gate_evaluator.evaluate(snapshot)
+            self._apply_market_data_quality_gate(
+                decision=decision,
+                evidence=market_data_quality,
+            )
 
         return PortfolioPromotionReplayResult(
             baseline_construction=baseline_construction,
@@ -436,6 +507,7 @@ class PortfolioPromotionReplay:
             snapshot=snapshot,
             decision=decision,
             regime_overlay=regime_overlay_evidence,
+            market_data_quality=market_data_quality,
         )
 
     def _build_regime_overlay_evidence(
@@ -453,6 +525,7 @@ class PortfolioPromotionReplay:
         return ReplayRegimeOverlayEvidence(
             decisions=evidence.decisions,
             summary=evidence.summary,
+            application_mode=replay_input.overlay_application_mode,
         )
 
     def _construction_with_overlay_budget(
@@ -505,6 +578,9 @@ class PortfolioPromotionReplay:
                         1.0 - sum(signal.target_weight for signal in adjusted_signals),
                         0.0,
                     ),
+                    selection_cash_weight=step.selection_cash_weight,
+                    single_name_cap_cash_weight=step.single_name_cap_cash_weight,
+                    industry_cap_cash_weight=step.industry_cap_cash_weight,
                 )
             )
         return PortfolioConstructionResult(steps=adjusted_steps)
@@ -786,12 +862,128 @@ class PortfolioPromotionReplay:
                 for step in replay_input.regime_overlay_observations
                 if step.trade_date in selected_trade_dates
             ],
+            overlay_application_mode=replay_input.overlay_application_mode,
             cost_scenario_pass=replay_input.cost_scenario_pass,
             regime_pass=replay_input.regime_pass,
             max_component_correlation=replay_input.max_component_correlation,
             correlation_to_existing_portfolio=replay_input.correlation_to_existing_portfolio,
             turnover_budget=replay_input.turnover_budget,
+            corporate_action_exception_windows=list(
+                replay_input.corporate_action_exception_windows
+            ),
+            market_data_quality_audit_path=replay_input.market_data_quality_audit_path,
         )
+
+    def _build_market_data_quality_evidence(
+        self,
+        *,
+        replay_input: PortfolioPromotionReplayInput,
+        artifacts_by_sleeve: dict[str, SleeveResearchArtifact],
+        trade_dates: list[str],
+    ) -> ReplayMarketDataQualityEvidence:
+        exposures = (
+            self._corporate_action_exception_exposures_for_portfolio(
+                portfolio=replay_input.baseline_portfolio,
+                artifacts_by_sleeve=artifacts_by_sleeve,
+                exception_windows=replay_input.corporate_action_exception_windows,
+                trade_dates=trade_dates,
+            )
+            + self._corporate_action_exception_exposures_for_portfolio(
+                portfolio=replay_input.candidate_portfolio,
+                artifacts_by_sleeve=artifacts_by_sleeve,
+                exception_windows=replay_input.corporate_action_exception_windows,
+                trade_dates=trade_dates,
+            )
+        )
+        return ReplayMarketDataQualityEvidence(
+            market_data_quality_audit_path=replay_input.market_data_quality_audit_path,
+            corporate_action_exception_window_count=len(
+                replay_input.corporate_action_exception_windows
+            ),
+            corporate_action_exception_exposures=exposures,
+            promotion_blocked=bool(exposures),
+        )
+
+    def _corporate_action_exception_exposures_for_portfolio(
+        self,
+        *,
+        portfolio: PortfolioRecipe,
+        artifacts_by_sleeve: dict[str, SleeveResearchArtifact],
+        exception_windows: list[CorporateActionExceptionWindow],
+        trade_dates: list[str],
+    ) -> list[ReplayCorporateActionExceptionExposure]:
+        if not exception_windows:
+            return []
+
+        windows_by_asset: dict[str, list[CorporateActionExceptionWindow]] = {}
+        for window in exception_windows:
+            windows_by_asset.setdefault(window.asset_id, []).append(window)
+
+        exposures: list[ReplayCorporateActionExceptionExposure] = []
+        seen: set[tuple[str, str, str, str]] = set()
+        for index, trade_date in enumerate(trade_dates):
+            interval_end_trade_date = (
+                trade_dates[index + 1]
+                if index + 1 < len(trade_dates)
+                else trade_date
+            )
+            interval_start_key = _date_key(trade_date)
+            interval_end_key = _date_key(interval_end_trade_date)
+            sleeve_ids_by_asset: dict[str, set[str]] = {}
+            for sleeve_id in portfolio.sleeves:
+                artifact = artifacts_by_sleeve[sleeve_id]
+                step = artifact.step_for_date(trade_date)
+                for record in step.records:
+                    if record.target_weight <= 0.0:
+                        continue
+                    sleeve_ids_by_asset.setdefault(record.asset_id, set()).add(sleeve_id)
+
+            for asset_id, sleeve_ids in sleeve_ids_by_asset.items():
+                for window in windows_by_asset.get(asset_id, []):
+                    if not _exception_window_intersects_interval(
+                        exception=window,
+                        interval_start_key=interval_start_key,
+                        interval_end_key=interval_end_key,
+                    ):
+                        continue
+                    dedupe_key = (
+                        portfolio.id,
+                        trade_date,
+                        asset_id,
+                        window.exception_id,
+                    )
+                    if dedupe_key in seen:
+                        continue
+                    seen.add(dedupe_key)
+                    exposures.append(
+                        ReplayCorporateActionExceptionExposure(
+                            exception_id=window.exception_id,
+                            portfolio_id=portfolio.id,
+                            asset_id=asset_id,
+                            previous_trade_date=window.previous_trade_date,
+                            exception_trade_date=window.trade_date,
+                            replay_trade_date=trade_date,
+                            interval_end_trade_date=interval_end_trade_date,
+                            sleeve_ids=sorted(sleeve_ids),
+                            severity=window.severity,
+                            triage_class=window.triage_class,
+                            recommended_action=window.recommended_action,
+                        )
+                    )
+        return exposures
+
+    def _apply_market_data_quality_gate(
+        self,
+        *,
+        decision: PromotionDecision,
+        evidence: ReplayMarketDataQualityEvidence,
+    ) -> None:
+        if not evidence.promotion_blocked:
+            return
+        failed_check = "corporate_action_exception_exposure"
+        if failed_check not in decision.failed_checks:
+            decision.failed_checks.append(failed_check)
+        decision.passed = False
 
     def _walk_forward_stability(
         self,
@@ -1290,3 +1482,23 @@ class PortfolioPromotionReplay:
         if not values:
             return 0.0
         return sum(values) / len(values)
+
+
+def _exception_window_intersects_interval(
+    *,
+    exception: CorporateActionExceptionWindow,
+    interval_start_key: str,
+    interval_end_key: str,
+) -> bool:
+    exception_start_key = _date_key(exception.previous_trade_date)
+    exception_end_key = _date_key(exception.trade_date)
+    if not exception_start_key or not exception_end_key:
+        return False
+    return exception_start_key <= interval_end_key and exception_end_key >= interval_start_key
+
+
+def _date_key(value: str) -> str:
+    text = str(value).strip()
+    if len(text) == 8 and text.isdigit():
+        return text
+    return text.replace("-", "")

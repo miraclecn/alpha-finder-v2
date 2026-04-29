@@ -233,6 +233,31 @@ def _add_industry_classification_pit(
     conn.close()
 
 
+def _add_corporate_action_exception_ledger(
+    path: Path,
+    rows: list[tuple[str, str, str, str, str, str, str]],
+) -> None:
+    conn = duckdb.connect(str(path))
+    conn.execute(
+        """
+        CREATE TABLE corporate_action_exception_ledger (
+            exception_id VARCHAR,
+            security_id VARCHAR,
+            previous_trade_date VARCHAR,
+            trade_date VARCHAR,
+            severity VARCHAR,
+            triage_class VARCHAR,
+            recommended_action VARCHAR
+        )
+        """
+    )
+    conn.executemany(
+        "INSERT INTO corporate_action_exception_ledger VALUES (?, ?, ?, ?, ?, ?, ?)",
+        rows,
+    )
+    conn.close()
+
+
 def _write_residual_component_snapshot(
     path: Path,
     *,
@@ -308,6 +333,171 @@ def _write_temp_residual_trend_sleeve(path: Path) -> None:
 
 
 class TrendResearchInputBuilderTest(unittest.TestCase):
+    def test_pit_adjusted_helpers_do_not_double_adjust_qfq_fallback(self) -> None:
+        from alpha_find_v2.trend_research_input_builder import (
+            _TradeLegSnapshot,
+            _pit_adjusted_close_sql,
+            _trade_leg_holding_return,
+        )
+
+        conn = duckdb.connect()
+        try:
+            conn.execute(
+                """
+                CREATE TABLE bars (
+                    id INTEGER,
+                    price_basis VARCHAR,
+                    close DOUBLE,
+                    adj_factor DOUBLE,
+                    close_adj DOUBLE
+                )
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO bars VALUES
+                (1, 'unadjusted', 10.0, 2.0, 999.0),
+                (2, 'qfq_fallback', 12.0, 4.0, 12.0)
+                """
+            )
+            expression = _pit_adjusted_close_sql(
+                "d",
+                {"price_basis", "close", "adj_factor", "close_adj"},
+            )
+            rows = conn.execute(
+                f"SELECT {expression} FROM bars AS d ORDER BY id"
+            ).fetchall()
+        finally:
+            conn.close()
+
+        self.assertEqual(rows, [(20.0,), (12.0,)])
+        self.assertAlmostEqual(
+            _trade_leg_holding_return(
+                entry_snapshot=_TradeLegSnapshot(
+                    open_price=10.0,
+                    high_price=10.0,
+                    low_price=10.0,
+                    pre_close=10.0,
+                    previous_close_adj=None,
+                    is_st=False,
+                    adj_factor=1.0,
+                    price_basis="unadjusted",
+                ),
+                exit_snapshot=_TradeLegSnapshot(
+                    open_price=10.0,
+                    high_price=10.0,
+                    low_price=10.0,
+                    pre_close=10.0,
+                    previous_close_adj=None,
+                    is_st=False,
+                    adj_factor=2.0,
+                    price_basis="unadjusted",
+                ),
+                entry_open=10.0,
+                exit_open=10.0,
+            ),
+            1.0,
+        )
+        self.assertIsNone(
+            _trade_leg_holding_return(
+                entry_snapshot=_TradeLegSnapshot(
+                    open_price=10.0,
+                    high_price=10.0,
+                    low_price=10.0,
+                    pre_close=10.0,
+                    previous_close_adj=None,
+                    is_st=False,
+                    adj_factor=1.0,
+                    price_basis="qfq_fallback",
+                ),
+                exit_snapshot=_TradeLegSnapshot(
+                    open_price=12.0,
+                    high_price=12.0,
+                    low_price=12.0,
+                    pre_close=10.0,
+                    previous_close_adj=None,
+                    is_st=False,
+                    adj_factor=4.0,
+                    price_basis="qfq_fallback",
+                ),
+                entry_open=10.0,
+                exit_open=12.0,
+            )
+        )
+
+    def test_builder_uses_raw_close_times_adj_factor_for_pit_returns(self) -> None:
+        from alpha_find_v2.trend_research_input_builder import (
+            build_trend_research_observation_input,
+            load_trend_research_input_build_case,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            source_db = temp_root / "research_source.duckdb"
+            case_path = temp_root / "build_case.toml"
+            trade_dates = _trading_days(date(2024, 1, 2), 95)
+            first_signal = trade_dates[60]
+            _create_research_source_db(source_db, trade_dates)
+            conn = duckdb.connect(str(source_db))
+            conn.execute("ALTER TABLE daily_bar_pit ADD COLUMN adj_factor DOUBLE DEFAULT 1.0")
+            conn.execute(
+                """
+                UPDATE daily_bar_pit
+                SET adj_factor = 2.0,
+                    close_adj = 1.0
+                WHERE security_id = '600001.SH'
+                  AND trade_date = ?
+                """,
+                [first_signal],
+            )
+            conn.execute(
+                """
+                UPDATE daily_bar_pit
+                SET adj_factor = 0.5,
+                    close_adj = 1000.0
+                WHERE security_id = '600002.SH'
+                  AND trade_date = ?
+                """,
+                [first_signal],
+            )
+            conn.close()
+
+            case_path.write_text(
+                "\n".join(
+                    [
+                        'schema_version = 1',
+                        'artifact_type = "trend_research_input_build_case"',
+                        'case_id = "trend_leadership_duckdb_case"',
+                        'description = "Use PIT raw price plus adjustment factors."',
+                        'sleeve_path = "config/sleeves/trend_leadership_core.toml"',
+                        f'source_db_path = "{source_db}"',
+                        f'output_path = "{temp_root / "trend_input.json"}"',
+                        f'start_date = "{first_signal}"',
+                        f'end_date = "{first_signal}"',
+                        'min_listing_days = 120',
+                        'lookback_days = 60',
+                        'short_window_days = 20',
+                        'turnover_window_days = 20',
+                        'rebalance_stride = 5',
+                        'holding_count = 2',
+                        'industry_label_source = "omit"',
+                        'residualization_mode = "non_residual_target"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            loaded_case = load_trend_research_input_build_case(case_path)
+            result = build_trend_research_observation_input(loaded_case)
+
+            first_step = result.observation_input.steps[0]
+            self.assertEqual(
+                [record.asset_id for record in first_step.records],
+                ["600001.SH", "600002.SH"],
+            )
+            self.assertGreater(first_step.records[0].score, first_step.records[1].score)
+
     def test_turnover_confirmation_uses_own_history_baseline(self) -> None:
         from alpha_find_v2.trend_research_input_builder import (
             _CandidateRow,
@@ -390,6 +580,67 @@ class TrendResearchInputBuilderTest(unittest.TestCase):
         self.assertEqual(scored[0]["candidate"].security_id, "POSITIVE_TREND")
         self.assertGreater(scored[0]["score"], scored[1]["score"])
 
+    def test_score_candidates_can_score_relative_to_industry_groups(self) -> None:
+        from alpha_find_v2.trend_research_input_builder import (
+            _CandidateRow,
+            _score_candidates,
+        )
+
+        common = {
+            "trade_date": "20260406",
+            "list_date": "20200102",
+            "entry_open": 10.0,
+            "exit_open": 11.0,
+            "median_turnover_cny": 200_000_000.0,
+            "turnover_baseline_cny": 100_000_000.0,
+            "entry_suspended": False,
+            "exit_suspended": False,
+            "entry_liquidity_pass": True,
+            "exit_liquidity_pass": True,
+            "entry_limit_locked": False,
+            "exit_limit_locked": False,
+            "short_return_vol": 0.02,
+        }
+        scored = _score_candidates(
+            candidates=[
+                _CandidateRow(
+                    security_id="BANK_LEADER",
+                    ret_short=0.05,
+                    ret_long=0.05,
+                    **common,
+                ),
+                _CandidateRow(
+                    security_id="BANK_LAGGARD",
+                    ret_short=0.04,
+                    ret_long=0.04,
+                    **common,
+                ),
+                _CandidateRow(
+                    security_id="TECH_LEADER",
+                    ret_short=0.50,
+                    ret_long=0.50,
+                    **common,
+                ),
+                _CandidateRow(
+                    security_id="TECH_LAGGARD",
+                    ret_short=0.49,
+                    ret_long=0.49,
+                    **common,
+                ),
+            ],
+            descriptor_weights={"medium_term_relative_strength": 1.0},
+            industry_by_asset={
+                "BANK_LEADER": "bank",
+                "BANK_LAGGARD": "bank",
+                "TECH_LEADER": "tech",
+                "TECH_LAGGARD": "tech",
+            },
+        )
+
+        ranked_ids = [item["candidate"].security_id for item in scored]
+        self.assertLess(ranked_ids.index("BANK_LEADER"), ranked_ids.index("TECH_LAGGARD"))
+        self.assertLess(ranked_ids.index("TECH_LEADER"), ranked_ids.index("BANK_LAGGARD"))
+
     def test_builder_emits_weekly_trend_observation_input_from_duckdb(self) -> None:
         from alpha_find_v2.trend_research_input_builder import (
             build_trend_research_observation_input,
@@ -444,8 +695,8 @@ class TrendResearchInputBuilderTest(unittest.TestCase):
             first_step = result.observation_input.steps[0]
             self.assertEqual([record.asset_id for record in first_step.records], ["600001.SH", "600002.SH"])
             self.assertEqual([record.rank for record in first_step.records], [1, 2])
-            self.assertTrue(isclose(sum(record.target_weight for record in first_step.records), 1.0))
-            self.assertTrue(all(isclose(record.target_weight, 0.5) for record in first_step.records))
+            self.assertTrue(isclose(sum(record.target_weight for record in first_step.records), 0.14))
+            self.assertTrue(all(isclose(record.target_weight, 0.07) for record in first_step.records))
             self.assertEqual(first_step.records[0].industry, "")
             self.assertTrue(first_step.records[0].entry_state.liquidity_pass)
             self.assertTrue(first_step.records[0].exit_state.liquidity_pass)
@@ -461,6 +712,143 @@ class TrendResearchInputBuilderTest(unittest.TestCase):
             roundtrip = load_sleeve_research_observation_input(output_path)
             self.assertEqual([step.trade_date for step in roundtrip.steps], [first_signal, second_signal])
             self.assertEqual([record.asset_id for record in roundtrip.steps[0].records], ["600001.SH", "600002.SH"])
+
+    def test_builder_excludes_candidate_crossing_exception_ledger_window(self) -> None:
+        from alpha_find_v2.trend_research_input_builder import (
+            build_trend_research_observation_input,
+            load_trend_research_input_build_case,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            source_db = temp_root / "research_source.duckdb"
+            case_path = temp_root / "build_case.toml"
+            trade_dates = _trading_days(date(2024, 1, 2), 95)
+            first_signal = trade_dates[60]
+            entry_trade_date = trade_dates[61]
+            _create_research_source_db(source_db, trade_dates)
+            _add_corporate_action_exception_ledger(
+                source_db,
+                [
+                    (
+                        "exception-600001-entry",
+                        "600001.SH",
+                        first_signal,
+                        entry_trade_date,
+                        "critical",
+                        "daily_pre_close_ex_right_without_ledger",
+                        "quarantine_security_window_from_promotion",
+                    )
+                ],
+            )
+
+            case_path.write_text(
+                "\n".join(
+                    [
+                        'schema_version = 1',
+                        'artifact_type = "trend_research_input_build_case"',
+                        'case_id = "trend_exception_quarantine_case"',
+                        'description = "Quarantine unresolved corporate-action windows before trend labels are emitted."',
+                        'sleeve_path = "config/sleeves/trend_leadership_core.toml"',
+                        f'source_db_path = "{source_db}"',
+                        f'output_path = "{temp_root / "trend_input.json"}"',
+                        f'start_date = "{first_signal}"',
+                        f'end_date = "{first_signal}"',
+                        'min_listing_days = 120',
+                        'lookback_days = 60',
+                        'short_window_days = 20',
+                        'turnover_window_days = 20',
+                        'rebalance_stride = 5',
+                        'industry_label_source = "omit"',
+                        'limit_lock_mode = "disabled"',
+                        'residualization_mode = "non_residual_target"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            loaded_case = load_trend_research_input_build_case(case_path)
+            result = build_trend_research_observation_input(loaded_case)
+
+            selected_ids = [
+                record.asset_id for record in result.observation_input.steps[0].records
+            ]
+            self.assertNotIn("600001.SH", selected_ids)
+            self.assertEqual(selected_ids, ["600002.SH"])
+            self.assertIn(
+                "corporate_action_exception_quarantine_excluded_count=1",
+                result.warnings,
+            )
+
+    def test_builder_excludes_candidate_crossing_qfq_fallback_window(self) -> None:
+        from alpha_find_v2.trend_research_input_builder import (
+            build_trend_research_observation_input,
+            load_trend_research_input_build_case,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            source_db = temp_root / "research_source.duckdb"
+            case_path = temp_root / "build_case.toml"
+            trade_dates = _trading_days(date(2024, 1, 2), 95)
+            first_signal = trade_dates[60]
+            entry_trade_date = trade_dates[61]
+            _create_research_source_db(source_db, trade_dates)
+            conn = duckdb.connect(str(source_db))
+            try:
+                conn.execute(
+                    "ALTER TABLE daily_bar_pit ADD COLUMN price_basis VARCHAR DEFAULT 'unadjusted'"
+                )
+                conn.execute(
+                    """
+                    UPDATE daily_bar_pit
+                    SET price_basis = 'qfq_fallback'
+                    WHERE security_id = '600001.SH' AND trade_date = ?
+                    """,
+                    [entry_trade_date],
+                )
+            finally:
+                conn.close()
+
+            case_path.write_text(
+                "\n".join(
+                    [
+                        'schema_version = 1',
+                        'artifact_type = "trend_research_input_build_case"',
+                        'case_id = "trend_qfq_fallback_quarantine_case"',
+                        'description = "Quarantine qfq fallback rows before trend labels are emitted."',
+                        'sleeve_path = "config/sleeves/trend_leadership_core.toml"',
+                        f'source_db_path = "{source_db}"',
+                        f'output_path = "{temp_root / "trend_input.json"}"',
+                        f'start_date = "{first_signal}"',
+                        f'end_date = "{first_signal}"',
+                        'min_listing_days = 120',
+                        'lookback_days = 60',
+                        'short_window_days = 20',
+                        'turnover_window_days = 20',
+                        'rebalance_stride = 5',
+                        'industry_label_source = "omit"',
+                        'limit_lock_mode = "disabled"',
+                        'residualization_mode = "non_residual_target"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            loaded_case = load_trend_research_input_build_case(case_path)
+            result = build_trend_research_observation_input(loaded_case)
+
+            selected_ids = [
+                record.asset_id for record in result.observation_input.steps[0].records
+            ]
+            self.assertNotIn("600001.SH", selected_ids)
+            self.assertEqual(selected_ids, ["600002.SH"])
+            self.assertIn(
+                "qfq_fallback_quarantine_excluded_count=1",
+                result.warnings,
+            )
 
     def test_builder_excludes_configured_boards_without_excluding_twenty_percent_boards(self) -> None:
         from alpha_find_v2.trend_research_input_builder import (
@@ -590,7 +978,7 @@ class TrendResearchInputBuilderTest(unittest.TestCase):
             self.assertNotIn("industry_labels_omitted", result.warnings)
             self.assertEqual(
                 result.warnings,
-                ["industry_relative_branch_blocked", "limit_lock_detection_disabled"],
+                ["limit_lock_detection_disabled"],
             )
 
     def test_builder_treats_intraday_industry_changes_as_not_same_day_usable(self) -> None:

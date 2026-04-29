@@ -15,7 +15,9 @@ The first production target is deliberately narrow:
 - execution style: end-of-day research, next-day open execution
 - holdings: 15-30 names
 - cadence: weekly or 2-3 times per week
-- risk stance: industry and size controlled, turnover budgeted, A-share constraints explicit
+- risk stance: industry control is enforced where PIT industry data is bound;
+  size and beta controls are planned/report-only until audited exposure inputs
+  exist; turnover and A-share execution constraints are explicit
 
 ## Current Research Doctrine
 
@@ -40,6 +42,10 @@ When audited `industry_classification_pit` data is present in the research
 DuckDB, the trend input builder can now bind PIT industry labels directly.
 If a portfolio uses `benchmark_relative` industry caps, V2 now rejects sleeve
 signals with blank industry labels instead of silently treating them as valid.
+Current sleeve scoring can normalize scores within PIT industry groups, and
+rank-based sleeve weights respect configured per-name caps. Size and beta are
+not marked enforced in configs because this round deliberately does not add an
+optimizer or Barra-style risk exposure estimator.
 The research-source bootstrap can now also import audited PIT reference tables
 from a supplemental DuckDB, and V2 can build a formal
 `benchmark_state_history` artifact either from staged benchmark membership plus
@@ -144,9 +150,13 @@ Note:
   compounds artifact forward returns and is not a real tradeable equity curve.
 - `run-portfolio-backtest` is the daily portfolio-level proof lane before
   shadow-live. It executes decision-date targets on the next trading day open,
-  uses `daily_bar_pit` adjusted OHLC columns as the research price basis for
-  fills and daily marks, records orders/fills and blocked/partial trades, and
-  ignores sleeve artifact `realized_return` for PnL.
+  uses raw unadjusted `daily_bar_pit` OHLC columns for fills and daily marks,
+  records orders/fills and blocked/partial trades, maintains a T+1
+  `available_shares` ledger, enforces `min_trade_weight`, and ignores sleeve
+  artifact `realized_return` for PnL. Backtest summaries now label the
+  portfolio return clock as next-open execution plus close marks and benchmark
+  active metrics as previous-close-to-current-close returns with previous
+  benchmark weights.
 - Revalidated on `2026-04-27`, the staged CSI 800 + `sw2021_l1` benchmark
   constituent coverage now spans `2014-02-21` through `2026-04-23`.
   `output/audits/sw_industry_pit_audit_20140221_20260423.json` reports

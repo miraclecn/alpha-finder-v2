@@ -198,12 +198,61 @@ class LiveReadinessTest(unittest.TestCase):
         self.assertEqual(evaluation.definition.candidate_id, "trend_leadership_shadow_live_v1")
         self.assertTrue(evaluation.summary.signal_release_gate_met)
         self.assertEqual(evaluation.summary.blockers, [])
+        self.assertEqual(evaluation.summary.qfq_fallback_price_exposure_count, 0)
+        self.assertEqual(evaluation.summary.tradeability_fallback_exposure_count, 0)
         self.assertEqual(evaluation.definition.validation_window_start, "2021-03-05")
         self.assertEqual(evaluation.definition.validation_window_end, "2026-03-19")
         self.assertGreaterEqual(evaluation.summary.calendar_years_covered, 5.0)
         self.assertNotIn("anchored_walk_forward", evaluation.summary.blockers)
         self.assertNotIn("regime_split", evaluation.summary.blockers)
-        self.assertNotIn("portfolio_evidence", evaluation.summary.blockers)
+
+    def test_multi_year_validation_audit_blocks_exception_window_exposure(self) -> None:
+        payload = json.loads(
+            (EXAMPLE_ROOT / "trend_leadership_multi_year_validation_audit_v1.json")
+            .read_text(encoding="utf-8")
+        )
+        payload["corporate_action_exception_exposure_count"] = 2
+        payload["corporate_action_exception_exposures"] = [
+            {
+                "portfolio_id": "trend_live_candidate_portfolio_with_overlay",
+                "asset_id": "000008.SZ",
+                "exception_trade_date": "20150924",
+                "replay_trade_date": "20150918",
+                "severity": "critical",
+                "triage_class": "daily_pre_close_ex_right_without_ledger",
+            }
+        ]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "audit.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+
+            evaluation = evaluate_multi_year_validation_audit(path)
+
+        self.assertFalse(evaluation.summary.signal_release_gate_met)
+        self.assertIn(
+            "corporate_action_exception_exposure",
+            evaluation.summary.blockers,
+        )
+
+    def test_multi_year_validation_audit_blocks_market_data_fallback_exposure(self) -> None:
+        payload = json.loads(
+            (EXAMPLE_ROOT / "trend_leadership_multi_year_validation_audit_v1.json")
+            .read_text(encoding="utf-8")
+        )
+        payload["qfq_fallback_price_exposure_count"] = 2
+        payload["tradeability_fallback_exposure_count"] = 3
+        payload["market_data_fallback_exposure_count"] = 5
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "audit.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+
+            evaluation = evaluate_multi_year_validation_audit(path)
+
+        self.assertFalse(evaluation.summary.signal_release_gate_met)
+        self.assertIn("qfq_fallback_price_exposure", evaluation.summary.blockers)
+        self.assertIn("tradeability_fallback_exposure", evaluation.summary.blockers)
 
     def test_cli_evaluate_multi_year_validation_audit_reports_release_gate(self) -> None:
         result = subprocess.run(
@@ -281,6 +330,73 @@ class LiveReadinessTest(unittest.TestCase):
             replay_case_path, candidate_portfolio_path = self._write_overlay_replay_case(
                 temp_root
             )
+            backtest_path = temp_root / "portfolio_backtest.json"
+            backtest_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "artifact_type": "portfolio_backtest_result",
+                        "case_id": "portfolio_backtest_active_metrics_test",
+                        "description": "Synthetic clean active portfolio backtest.",
+                        "artifact": {
+                            "summary": {
+                                "information_ratio": 0.42,
+                                "active_annualized_return": 0.031,
+                                "tracking_error": 0.074,
+                                "corporate_action_exception_exposure_count": 0,
+                                "qfq_fallback_price_exposure_count": 0,
+                                "tradeability_fallback_exposure_count": 0,
+                                "market_data_fallback_exposure_count": 0,
+                            },
+                            "diagnostics": {},
+                        },
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            case_path = self._write_multi_year_audit_case(
+                temp_root=temp_root,
+                candidate_id="overlay_candidate_test",
+                portfolio_path=str(candidate_portfolio_path),
+                replay_case_path=str(replay_case_path),
+                portfolio_backtest_result_path=str(backtest_path),
+            )
+
+            loaded_case = load_multi_year_validation_audit_build_case(case_path)
+            definition = build_multi_year_validation_audit(loaded_case)
+            output_path = write_multi_year_validation_audit(
+                definition,
+                loaded_case.definition.output_path,
+            )
+            evaluation = evaluate_multi_year_validation_audit(output_path)
+
+            self.assertTrue(definition.anchored_walk_forward_complete)
+            self.assertTrue(definition.regime_split_complete)
+            self.assertTrue(definition.portfolio_evidence_complete)
+            self.assertAlmostEqual(definition.active_backtest_information_ratio, 0.42)
+            self.assertNotIn("anchored_walk_forward", evaluation.summary.blockers)
+            self.assertNotIn("regime_split", evaluation.summary.blockers)
+            self.assertNotIn("portfolio_evidence", evaluation.summary.blockers)
+            self.assertNotIn("active_backtest_ir", evaluation.summary.blockers)
+            joined_notes = "\n".join(definition.notes)
+            self.assertNotIn("does not yet apply overlay gross-exposure changes", joined_notes)
+            self.assertTrue(definition.market_state_coverage.fragile_leadership)
+            self.assertNotIn(
+                "fragile_leadership",
+                evaluation.summary.missing_market_states,
+            )
+
+    def test_build_multi_year_validation_audit_blocks_missing_active_backtest_ir(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            replay_case_path, candidate_portfolio_path = self._write_overlay_replay_case(
+                temp_root
+            )
             case_path = self._write_multi_year_audit_case(
                 temp_root=temp_root,
                 candidate_id="overlay_candidate_test",
@@ -296,19 +412,72 @@ class LiveReadinessTest(unittest.TestCase):
             )
             evaluation = evaluate_multi_year_validation_audit(output_path)
 
-            self.assertTrue(definition.anchored_walk_forward_complete)
-            self.assertTrue(definition.regime_split_complete)
-            self.assertTrue(definition.portfolio_evidence_complete)
-            self.assertNotIn("anchored_walk_forward", evaluation.summary.blockers)
-            self.assertNotIn("regime_split", evaluation.summary.blockers)
-            self.assertNotIn("portfolio_evidence", evaluation.summary.blockers)
-            joined_notes = "\n".join(definition.notes)
-            self.assertNotIn("does not yet apply overlay gross-exposure changes", joined_notes)
-            self.assertTrue(definition.market_state_coverage.fragile_leadership)
-            self.assertNotIn(
-                "fragile_leadership",
-                evaluation.summary.missing_market_states,
+            self.assertFalse(definition.portfolio_evidence_complete)
+            self.assertIsNone(definition.active_backtest_information_ratio)
+            self.assertIn("active_backtest_ir", evaluation.summary.blockers)
+
+    def test_build_multi_year_validation_audit_reads_portfolio_backtest_quality_counts(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            replay_case_path, candidate_portfolio_path = self._write_overlay_replay_case(
+                temp_root
             )
+            backtest_path = temp_root / "portfolio_backtest.json"
+            backtest_payload = {
+                "schema_version": 1,
+                "artifact_type": "portfolio_backtest_result",
+                "case_id": "portfolio_backtest_quality_test",
+                "description": "Synthetic portfolio backtest quality evidence.",
+                "artifact": {
+                    "summary": {
+                        "corporate_action_exception_exposure_count": 1,
+                        "qfq_fallback_price_exposure_count": 2,
+                        "tradeability_fallback_exposure_count": 3,
+                        "market_data_fallback_exposure_count": 5,
+                    },
+                    "diagnostics": {
+                        "corporate_action_exception_exposures": [
+                            {
+                                "asset_id": "AAA",
+                                "trade_date": "20260106",
+                                "reason": "corporate_action_exception_exposure",
+                            }
+                        ]
+                    },
+                },
+            }
+            backtest_path.write_text(
+                json.dumps(backtest_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            case_path = self._write_multi_year_audit_case(
+                temp_root=temp_root,
+                candidate_id="overlay_candidate_test",
+                portfolio_path=str(candidate_portfolio_path),
+                replay_case_path=str(replay_case_path),
+                portfolio_backtest_result_path=str(backtest_path),
+            )
+
+            loaded_case = load_multi_year_validation_audit_build_case(case_path)
+            definition = build_multi_year_validation_audit(loaded_case)
+            output_path = write_multi_year_validation_audit(
+                definition,
+                loaded_case.definition.output_path,
+            )
+            evaluation = evaluate_multi_year_validation_audit(output_path)
+
+            self.assertEqual(definition.corporate_action_exception_exposure_count, 1)
+            self.assertEqual(definition.qfq_fallback_price_exposure_count, 2)
+            self.assertEqual(definition.tradeability_fallback_exposure_count, 3)
+            self.assertFalse(definition.portfolio_evidence_complete)
+            self.assertIn(
+                "corporate_action_exception_exposure",
+                evaluation.summary.blockers,
+            )
+            self.assertIn("qfq_fallback_price_exposure", evaluation.summary.blockers)
+            self.assertIn("tradeability_fallback_exposure", evaluation.summary.blockers)
 
     def test_cli_build_multi_year_validation_audit_reports_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -404,6 +573,7 @@ class LiveReadinessTest(unittest.TestCase):
         candidate_id: str,
         portfolio_path: str,
         replay_case_path: str = "",
+        portfolio_backtest_result_path: str = "",
     ) -> Path:
         benchmark_case_path = self._write_benchmark_build_case(temp_root)
         trend_case_path = self._write_trend_build_case(temp_root)
@@ -424,6 +594,10 @@ class LiveReadinessTest(unittest.TestCase):
         ]
         if replay_case_path:
             lines.append(f'replay_case_path = "{replay_case_path}"')
+        if portfolio_backtest_result_path:
+            lines.append(
+                f'portfolio_backtest_result_path = "{portfolio_backtest_result_path}"'
+            )
         lines.extend(
             [
                 "notes = [",

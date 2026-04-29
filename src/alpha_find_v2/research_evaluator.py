@@ -111,6 +111,7 @@ class PortfolioResearchEvaluator:
         marginal_ir_delta: float,
         marginal_drawdown_increase: float,
         regime_overlay_summary: RegimeOverlaySummary | None = None,
+        overlay_application_mode: str = "",
     ) -> SleevePromotionSnapshot:
         realized_turnover_vs_budget = 0.0
         if turnover_budget > 0.0:
@@ -121,9 +122,20 @@ class PortfolioResearchEvaluator:
             oos_tstat=summary.tstat,
             breadth=summary.breadth,
             peak_to_trough_drawdown=summary.peak_to_trough_drawdown,
+            research_ir=summary.ir,
+            research_tstat=summary.tstat,
+            metric_basis="artifact_period_absolute_net_return",
             turnover_budget=turnover_budget,
             cost_scenario_pass=cost_scenario_pass,
             regime_pass=regime_pass,
+            cost_scenario_evidence_basis={
+                scenario: "manual_input"
+                for scenario in cost_scenario_pass
+            },
+            regime_evidence_basis={
+                regime: "manual_input"
+                for regime in regime_pass
+            },
             max_component_correlation=max_component_correlation,
             correlation_to_existing_portfolio=correlation_to_existing_portfolio,
             realized_turnover_vs_budget=realized_turnover_vs_budget,
@@ -150,6 +162,7 @@ class PortfolioResearchEvaluator:
                 if regime_overlay_summary is not None
                 else []
             ),
+            overlay_application_mode=overlay_application_mode,
         )
 
     def _peak_to_trough_drawdown(self, returns: list[float]) -> float:

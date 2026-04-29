@@ -4,6 +4,8 @@ import subprocess
 import tempfile
 import unittest
 
+import duckdb
+
 from alpha_find_v2.config_loader import CONFIG_ROOT
 from alpha_find_v2.deployment_loader import load_portfolio_state_snapshot
 from alpha_find_v2.live_state import (
@@ -164,6 +166,7 @@ class ResearchArtifactLoaderTest(unittest.TestCase):
                 "candidate_summary",
                 "diagnostics",
                 "marginal",
+                "market_data_quality",
                 "regime_breakdown",
                 "regime_overlay",
                 "walk_forward",
@@ -210,6 +213,71 @@ class ResearchArtifactLoaderTest(unittest.TestCase):
             [split.start_trade_date for split in loaded_case.replay_input.walk_forward_splits],
             ["2026-04-06", "2026-04-13"],
         )
+
+    def test_load_portfolio_promotion_replay_case_reads_exception_windows_from_source_db(self) -> None:
+        case_text = (EXAMPLE_ROOT / "replay_case.toml").read_text(
+            encoding="utf-8"
+        ).replace(
+            "[cost_scenario_pass]",
+            'market_data_source_db_path = "{db_path}"\n'
+            'market_data_quality_audit_path = "output/audits/market_data_quality_20260429.json"\n\n'
+            "[cost_scenario_pass]",
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            db_path = temp_root / "research_source.duckdb"
+            conn = duckdb.connect(str(db_path))
+            try:
+                conn.execute(
+                    """
+                    CREATE TABLE corporate_action_exception_ledger (
+                        exception_id VARCHAR,
+                        security_id VARCHAR,
+                        previous_trade_date VARCHAR,
+                        trade_date VARCHAR,
+                        severity VARCHAR,
+                        triage_class VARCHAR,
+                        recommended_action VARCHAR
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO corporate_action_exception_ledger VALUES
+                    (
+                        'DDD:20260409:20260410',
+                        'DDD',
+                        '20260409',
+                        '20260410',
+                        'critical',
+                        'daily_pre_close_ex_right_without_ledger',
+                        'quarantine_security_window_from_promotion'
+                    )
+                    """
+                )
+            finally:
+                conn.close()
+            case_path = temp_root / "replay_case.toml"
+            case_path.write_text(
+                case_text.format(db_path=db_path),
+                encoding="utf-8",
+            )
+
+            loaded_case = load_portfolio_promotion_replay_case(case_path)
+
+        self.assertEqual(
+            loaded_case.definition.market_data_quality_audit_path,
+            "output/audits/market_data_quality_20260429.json",
+        )
+        self.assertEqual(
+            len(loaded_case.replay_input.corporate_action_exception_windows),
+            1,
+        )
+        exception = loaded_case.replay_input.corporate_action_exception_windows[0]
+        self.assertEqual(exception.exception_id, "DDD:20260409:20260410")
+        self.assertEqual(exception.asset_id, "DDD")
+        self.assertEqual(exception.trade_date, "20260410")
 
     def test_load_portfolio_promotion_replay_case_rejects_mixed_target_ids(self) -> None:
         baseline_portfolio = """id = "mixed_target_baseline"

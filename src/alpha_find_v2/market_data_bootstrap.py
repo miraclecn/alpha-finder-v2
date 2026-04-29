@@ -166,6 +166,10 @@ def build_research_source_db(
                 WHEN u.ts_code IS NOT NULL THEN u.close * a.adj_factor
                 ELSE q.close
             END AS close_adj,
+            CASE
+                WHEN u.ts_code IS NOT NULL THEN 'raw_times_adj_factor'
+                ELSE 'qfq_diagnostic_only'
+            END AS adjusted_price_source,
             COALESCE(u.vol, q.vol) * 100.0 AS volume_shares,
             COALESCE(u.amount, q.amount) * 1000.0 AS turnover_value_cny,
             d.turnover_rate AS turnover_rate_pct,
@@ -280,6 +284,33 @@ def build_research_source_db(
             "weight",
         },
     )
+    imported_raw_dividend = _materialize_optional_raw_event_table(
+        conn,
+        table_name="raw_dividend",
+    )
+    imported_raw_stk_limit = _materialize_optional_raw_event_table(
+        conn,
+        table_name="raw_stk_limit",
+    )
+    imported_raw_suspend_d = _materialize_optional_raw_event_table(
+        conn,
+        table_name="raw_suspend_d",
+    )
+    imported_raw_share_float = _materialize_optional_raw_event_table(
+        conn,
+        table_name="raw_share_float",
+    )
+    imported_raw_repurchase = _materialize_optional_raw_event_table(
+        conn,
+        table_name="raw_repurchase",
+    )
+    _build_corporate_action_ledger(conn, imported_raw_dividend=imported_raw_dividend)
+    _build_corporate_action_exception_ledger(conn)
+    _build_tradeability_state_daily(
+        conn,
+        imported_raw_stk_limit=imported_raw_stk_limit,
+        imported_raw_suspend_d=imported_raw_suspend_d,
+    )
 
     conn.execute(
         """
@@ -287,7 +318,7 @@ def build_research_source_db(
         SELECT
             'daily_bar_pit' AS dataset_id,
             'green' AS status,
-            '2014+ daily bars with unit normalization; raw_kline_unadj preferred and raw_kline_qfq used only as labeled fallback' AS note,
+            '2014+ daily bars with unit normalization; raw_kline_unadj is execution truth and adjusted fields are explicitly sourced diagnostics',
             COUNT(*) AS row_count,
             MIN(trade_date) AS earliest_date,
             MAX(trade_date) AS latest_date
@@ -337,6 +368,33 @@ def build_research_source_db(
             MIN(list_date),
             MAX(COALESCE(delist_date, list_date))
         FROM security_master_ref
+        UNION ALL
+        SELECT
+            'corporate_action_ledger',
+            'green',
+            'implemented dividend rows normalized into cash and share action bookings',
+            COUNT(*),
+            MIN(book_date),
+            MAX(book_date)
+        FROM corporate_action_ledger
+        UNION ALL
+        SELECT
+            'corporate_action_exception_ledger',
+            CASE WHEN COUNT(*) = 0 THEN 'green' ELSE 'amber' END,
+            'unexplained adj_factor jumps are quarantined as promotion-blocking security windows; no inferred cash or share booking',
+            COUNT(*),
+            MIN(trade_date),
+            MAX(trade_date)
+        FROM corporate_action_exception_ledger
+        UNION ALL
+        SELECT
+            'tradeability_state_daily',
+            'green',
+            'official suspension and limit records when available with OHLC fallback diagnostics',
+            COUNT(*),
+            MIN(trade_date),
+            MAX(trade_date)
+        FROM tradeability_state_daily
         """
     )
     if imported_benchmark:
@@ -480,6 +538,525 @@ def _materialize_optional_pit_table(
         return True
 
     raise ValueError(f"Unsupported optional PIT table import: {table_name}")
+
+
+def _materialize_optional_raw_event_table(
+    conn: Any,
+    *,
+    table_name: str,
+) -> bool:
+    source_alias = _preferred_attached_source(conn, table_name)
+    if source_alias is None:
+        _create_empty_raw_event_table(conn, table_name)
+        return False
+    columns = _table_columns(conn, source_alias, table_name)
+    required_columns = _raw_event_required_columns(table_name)
+    missing_columns = sorted(required_columns - columns)
+    if missing_columns:
+        raise ValueError(
+            f"{source_alias}.{table_name} is missing required columns: {', '.join(missing_columns)}"
+        )
+    if table_name == "raw_dividend":
+        conn.execute(
+            f"""
+            CREATE OR REPLACE TABLE raw_dividend AS
+            SELECT
+                CAST(ts_code AS VARCHAR) AS ts_code,
+                {_nullable_varchar_sql('end_date')} AS end_date,
+                {_nullable_varchar_sql('ann_date')} AS ann_date,
+                CAST(div_proc AS VARCHAR) AS div_proc,
+                CAST(stk_div AS DOUBLE) AS stk_div,
+                CAST(stk_bo_rate AS DOUBLE) AS stk_bo_rate,
+                CAST(stk_co_rate AS DOUBLE) AS stk_co_rate,
+                CAST(cash_div AS DOUBLE) AS cash_div,
+                CAST(cash_div_tax AS DOUBLE) AS cash_div_tax,
+                {_nullable_varchar_sql('record_date')} AS record_date,
+                {_nullable_varchar_sql('ex_date')} AS ex_date,
+                {_nullable_varchar_sql('pay_date')} AS pay_date,
+                {_nullable_varchar_sql('div_listdate')} AS div_listdate,
+                COALESCE(CAST(source_table AS VARCHAR), 'raw_dividend') AS source_table,
+                ingested_at
+            FROM {source_alias}.raw_dividend
+            """
+        )
+        return True
+    if table_name == "raw_stk_limit":
+        conn.execute(
+            f"""
+            CREATE OR REPLACE TABLE raw_stk_limit AS
+            SELECT
+                CAST(ts_code AS VARCHAR) AS ts_code,
+                CAST(trade_date AS VARCHAR) AS trade_date,
+                CAST(up_limit AS DOUBLE) AS up_limit,
+                CAST(down_limit AS DOUBLE) AS down_limit,
+                COALESCE(CAST(source_table AS VARCHAR), 'raw_stk_limit') AS source_table,
+                ingested_at
+            FROM {source_alias}.raw_stk_limit
+            """
+        )
+        return True
+    if table_name == "raw_suspend_d":
+        conn.execute(
+            f"""
+            CREATE OR REPLACE TABLE raw_suspend_d AS
+            SELECT
+                CAST(ts_code AS VARCHAR) AS ts_code,
+                CAST(trade_date AS VARCHAR) AS trade_date,
+                CAST(suspend_timing AS VARCHAR) AS suspend_timing,
+                CAST(suspend_type AS VARCHAR) AS suspend_type,
+                COALESCE(CAST(source_table AS VARCHAR), 'raw_suspend_d') AS source_table,
+                ingested_at
+            FROM {source_alias}.raw_suspend_d
+            """
+        )
+        return True
+    if table_name == "raw_share_float":
+        conn.execute(
+            f"""
+            CREATE OR REPLACE TABLE raw_share_float AS
+            SELECT
+                CAST(ts_code AS VARCHAR) AS ts_code,
+                {_nullable_varchar_sql('ann_date')} AS ann_date,
+                {_nullable_varchar_sql('float_date')} AS float_date,
+                CAST(float_share AS DOUBLE) AS float_share,
+                CAST(float_ratio AS DOUBLE) AS float_ratio,
+                CAST(holder_name AS VARCHAR) AS holder_name,
+                CAST(share_type AS VARCHAR) AS share_type,
+                COALESCE(CAST(source_table AS VARCHAR), 'raw_share_float') AS source_table,
+                ingested_at
+            FROM {source_alias}.raw_share_float
+            """
+        )
+        return True
+    if table_name == "raw_repurchase":
+        conn.execute(
+            f"""
+            CREATE OR REPLACE TABLE raw_repurchase AS
+            SELECT
+                CAST(ts_code AS VARCHAR) AS ts_code,
+                {_nullable_varchar_sql('ann_date')} AS ann_date,
+                {_nullable_varchar_sql('end_date')} AS end_date,
+                CAST(proc AS VARCHAR) AS proc,
+                {_nullable_varchar_sql('exp_date')} AS exp_date,
+                CAST(vol AS DOUBLE) AS vol,
+                CAST(amount AS DOUBLE) AS amount,
+                CAST(high_limit AS DOUBLE) AS high_limit,
+                CAST(low_limit AS DOUBLE) AS low_limit,
+                COALESCE(CAST(source_table AS VARCHAR), 'raw_repurchase') AS source_table,
+                ingested_at
+            FROM {source_alias}.raw_repurchase
+            """
+        )
+        return True
+    raise ValueError(f"Unsupported optional raw event table import: {table_name}")
+
+
+def _create_empty_raw_event_table(conn: Any, table_name: str) -> None:
+    schemas = {
+        "raw_dividend": """
+            CREATE OR REPLACE TABLE raw_dividend (
+                ts_code VARCHAR,
+                end_date VARCHAR,
+                ann_date VARCHAR,
+                div_proc VARCHAR,
+                stk_div DOUBLE,
+                stk_bo_rate DOUBLE,
+                stk_co_rate DOUBLE,
+                cash_div DOUBLE,
+                cash_div_tax DOUBLE,
+                record_date VARCHAR,
+                ex_date VARCHAR,
+                pay_date VARCHAR,
+                div_listdate VARCHAR,
+                source_table VARCHAR,
+                ingested_at TIMESTAMP
+            )
+        """,
+        "raw_stk_limit": """
+            CREATE OR REPLACE TABLE raw_stk_limit (
+                ts_code VARCHAR,
+                trade_date VARCHAR,
+                up_limit DOUBLE,
+                down_limit DOUBLE,
+                source_table VARCHAR,
+                ingested_at TIMESTAMP
+            )
+        """,
+        "raw_suspend_d": """
+            CREATE OR REPLACE TABLE raw_suspend_d (
+                ts_code VARCHAR,
+                trade_date VARCHAR,
+                suspend_timing VARCHAR,
+                suspend_type VARCHAR,
+                source_table VARCHAR,
+                ingested_at TIMESTAMP
+            )
+        """,
+        "raw_share_float": """
+            CREATE OR REPLACE TABLE raw_share_float (
+                ts_code VARCHAR,
+                ann_date VARCHAR,
+                float_date VARCHAR,
+                float_share DOUBLE,
+                float_ratio DOUBLE,
+                holder_name VARCHAR,
+                share_type VARCHAR,
+                source_table VARCHAR,
+                ingested_at TIMESTAMP
+            )
+        """,
+        "raw_repurchase": """
+            CREATE OR REPLACE TABLE raw_repurchase (
+                ts_code VARCHAR,
+                ann_date VARCHAR,
+                end_date VARCHAR,
+                proc VARCHAR,
+                exp_date VARCHAR,
+                vol DOUBLE,
+                amount DOUBLE,
+                high_limit DOUBLE,
+                low_limit DOUBLE,
+                source_table VARCHAR,
+                ingested_at TIMESTAMP
+            )
+        """,
+    }
+    conn.execute(schemas[table_name])
+
+
+def _raw_event_required_columns(table_name: str) -> set[str]:
+    common = {"source_table", "ingested_at"}
+    if table_name == "raw_dividend":
+        return {
+            "ts_code",
+            "end_date",
+            "ann_date",
+            "div_proc",
+            "stk_div",
+            "stk_bo_rate",
+            "stk_co_rate",
+            "cash_div",
+            "cash_div_tax",
+            "record_date",
+            "ex_date",
+            "pay_date",
+            "div_listdate",
+            *common,
+        }
+    if table_name == "raw_stk_limit":
+        return {"ts_code", "trade_date", "up_limit", "down_limit", *common}
+    if table_name == "raw_suspend_d":
+        return {"ts_code", "trade_date", "suspend_timing", "suspend_type", *common}
+    if table_name == "raw_share_float":
+        return {
+            "ts_code",
+            "ann_date",
+            "float_date",
+            "float_share",
+            "float_ratio",
+            "holder_name",
+            "share_type",
+            *common,
+        }
+    if table_name == "raw_repurchase":
+        return {
+            "ts_code",
+            "ann_date",
+            "end_date",
+            "proc",
+            "exp_date",
+            "vol",
+            "amount",
+            "high_limit",
+            "low_limit",
+            *common,
+        }
+    raise ValueError(f"Unsupported raw event table: {table_name}")
+
+
+def _nullable_varchar_sql(column_name: str) -> str:
+    return f"NULLIF(CAST({column_name} AS VARCHAR), '')"
+
+
+def _build_corporate_action_ledger(
+    conn: Any,
+    *,
+    imported_raw_dividend: bool,
+) -> None:
+    conn.execute(
+        """
+        CREATE OR REPLACE TABLE corporate_action_ledger AS
+        WITH implemented AS (
+            SELECT
+                ts_code AS security_id,
+                end_date,
+                record_date,
+                ex_date,
+                COALESCE(pay_date, ex_date) AS pay_date,
+                COALESCE(cash_div_tax, cash_div, 0.0) AS cash_per_share,
+                COALESCE(stk_div, 0.0) + COALESCE(stk_bo_rate, 0.0) + COALESCE(stk_co_rate, 0.0) AS share_ratio,
+                source_table
+            FROM raw_dividend
+            WHERE div_proc = '实施'
+              AND ex_date IS NOT NULL
+              AND trim(ex_date) <> ''
+        ),
+        action_rows AS (
+            SELECT
+                security_id || ':' || COALESCE(end_date, '') || ':' || ex_date || ':cash' AS action_id,
+                security_id,
+                'cash_dividend' AS action_type,
+                record_date,
+                pay_date AS book_date,
+                ex_date,
+                cash_per_share,
+                0.0 AS share_ratio,
+                source_table
+            FROM implemented
+            WHERE cash_per_share IS NOT NULL
+              AND cash_per_share > 0.0
+              AND pay_date IS NOT NULL
+              AND trim(pay_date) <> ''
+            UNION ALL
+            SELECT
+                security_id || ':' || COALESCE(end_date, '') || ':' || ex_date || ':share' AS action_id,
+                security_id,
+                'share_dividend' AS action_type,
+                record_date,
+                COALESCE(ex_date, pay_date) AS book_date,
+                ex_date,
+                0.0 AS cash_per_share,
+                share_ratio,
+                source_table
+            FROM implemented
+            WHERE share_ratio IS NOT NULL
+              AND share_ratio > 0.0
+        )
+        SELECT *
+        FROM action_rows
+        """
+    )
+
+
+def _build_corporate_action_exception_ledger(conn: Any) -> None:
+    conn.execute(
+        """
+        CREATE OR REPLACE TABLE corporate_action_exception_ledger AS
+        WITH jumps AS (
+            SELECT
+                security_id,
+                trade_date,
+                lag(trade_date) OVER (
+                    PARTITION BY security_id
+                    ORDER BY trade_date
+                ) AS previous_trade_date,
+                close,
+                lag(close) OVER (
+                    PARTITION BY security_id
+                    ORDER BY trade_date
+                ) AS previous_close,
+                pre_close,
+                adj_factor,
+                lag(adj_factor) OVER (
+                    PARTITION BY security_id
+                    ORDER BY trade_date
+                ) AS previous_adj_factor
+            FROM daily_bar_pit
+            WHERE COALESCE(price_basis, 'unadjusted') = 'unadjusted'
+              AND adj_factor IS NOT NULL
+              AND adj_factor > 0.0
+        ),
+        significant_jumps AS (
+            SELECT
+                security_id,
+                previous_trade_date,
+                trade_date,
+                previous_close,
+                pre_close,
+                previous_adj_factor,
+                adj_factor AS current_adj_factor,
+                adj_factor / NULLIF(previous_adj_factor, 0.0) AS factor_ratio,
+                abs((adj_factor / NULLIF(previous_adj_factor, 0.0)) - 1.0)
+                    AS abs_factor_change,
+                previous_close / NULLIF(pre_close, 0.0) AS pre_close_factor_ratio
+            FROM jumps
+            WHERE previous_trade_date IS NOT NULL
+              AND previous_adj_factor IS NOT NULL
+              AND previous_adj_factor > 0.0
+              AND abs((adj_factor / NULLIF(previous_adj_factor, 0.0)) - 1.0) > 0.001
+        ),
+        unresolved AS (
+            SELECT
+                j.*
+            FROM significant_jumps AS j
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM corporate_action_ledger AS c
+                WHERE c.security_id = j.security_id
+                  AND (
+                    (
+                        c.ex_date IS NOT NULL
+                        AND regexp_matches(CAST(c.ex_date AS VARCHAR), '^[0-9]{8}$')
+                        AND CAST(c.ex_date AS VARCHAR) > j.previous_trade_date
+                        AND CAST(c.ex_date AS VARCHAR) <= j.trade_date
+                    )
+                    OR (
+                        c.book_date IS NOT NULL
+                        AND regexp_matches(CAST(c.book_date AS VARCHAR), '^[0-9]{8}$')
+                        AND CAST(c.book_date AS VARCHAR) > j.previous_trade_date
+                        AND CAST(c.book_date AS VARCHAR) <= j.trade_date
+                    )
+                  )
+            )
+        ),
+        with_context AS (
+            SELECT
+                u.*,
+                abs(
+                    u.factor_ratio / NULLIF(u.pre_close_factor_ratio, 0.0) - 1.0
+                ) AS factor_pre_close_basis_diff,
+                EXISTS (
+                    SELECT 1
+                    FROM raw_suspend_d AS s
+                    WHERE s.ts_code = u.security_id
+                      AND s.trade_date > u.previous_trade_date
+                      AND s.trade_date <= u.trade_date
+                ) AS has_suspend_window,
+                EXISTS (
+                    SELECT 1
+                    FROM raw_dividend AS r
+                    WHERE r.ts_code = u.security_id
+                      AND r.div_proc <> '实施'
+                      AND r.ex_date = u.trade_date
+                ) AS has_same_date_nonimplemented_dividend,
+                (
+                    SELECT min(
+                        abs(
+                            date_diff(
+                                'day',
+                                strptime(r.ex_date, '%Y%m%d'),
+                                strptime(u.trade_date, '%Y%m%d')
+                            )
+                        )
+                    )
+                    FROM raw_dividend AS r
+                    WHERE r.ts_code = u.security_id
+                      AND r.div_proc = '实施'
+                      AND r.ex_date IS NOT NULL
+                      AND regexp_matches(r.ex_date, '^[0-9]{8}$')
+                ) AS nearest_implemented_dividend_days
+            FROM unresolved AS u
+        ),
+        classified AS (
+            SELECT
+                security_id || ':' || previous_trade_date || ':' || trade_date
+                    || ':adj_factor_exception' AS exception_id,
+                security_id,
+                previous_trade_date,
+                trade_date,
+                previous_adj_factor,
+                current_adj_factor,
+                factor_ratio,
+                abs_factor_change,
+                previous_close,
+                pre_close,
+                pre_close_factor_ratio,
+                factor_pre_close_basis_diff,
+                CASE
+                    WHEN abs_factor_change <= 0.005 THEN '<=50bp'
+                    WHEN abs_factor_change <= 0.02 THEN '<=2pct'
+                    WHEN abs_factor_change <= 0.10 THEN '<=10pct'
+                    ELSE '>10pct'
+                END AS magnitude_bucket,
+                CASE
+                    WHEN abs_factor_change <= 0.005 THEN 'low'
+                    WHEN abs_factor_change <= 0.02 THEN 'medium'
+                    WHEN abs_factor_change <= 0.10 THEN 'high'
+                    ELSE 'critical'
+                END AS severity,
+                has_suspend_window,
+                CASE
+                    WHEN has_same_date_nonimplemented_dividend
+                        THEN 'nonimplemented_dividend_same_date'
+                    WHEN nearest_implemented_dividend_days BETWEEN 1 AND 30
+                        THEN 'implemented_dividend_outside_factor_window'
+                    WHEN factor_pre_close_basis_diff <= 0.001
+                        THEN 'daily_pre_close_ex_right_without_ledger'
+                    WHEN abs_factor_change <= 0.005
+                        THEN 'low_materiality_provider_factor_noise'
+                    ELSE 'provider_factor_jump_without_event_evidence'
+                END AS triage_class,
+                'quarantine_security_window_from_promotion' AS recommended_action,
+                'derived.adj_factor_reconciliation' AS source_table
+            FROM with_context
+        )
+        SELECT *
+        FROM classified
+        ORDER BY security_id, trade_date
+        """
+    )
+
+
+def _build_tradeability_state_daily(
+    conn: Any,
+    *,
+    imported_raw_stk_limit: bool,
+    imported_raw_suspend_d: bool,
+) -> None:
+    conn.execute(
+        """
+        CREATE OR REPLACE TABLE tradeability_state_daily AS
+        WITH suspend_key AS (
+            SELECT
+                ts_code,
+                trade_date
+            FROM raw_suspend_d
+            WHERE ts_code IS NOT NULL
+              AND trade_date IS NOT NULL
+            GROUP BY ts_code, trade_date
+        ),
+        limit_key AS (
+            SELECT
+                ts_code,
+                trade_date,
+                MAX(up_limit) AS up_limit,
+                MIN(down_limit) AS down_limit
+            FROM raw_stk_limit
+            WHERE ts_code IS NOT NULL
+              AND trade_date IS NOT NULL
+            GROUP BY ts_code, trade_date
+        )
+        SELECT
+            d.security_id,
+            d.trade_date,
+            CASE
+                WHEN s.ts_code IS NOT NULL THEN TRUE
+                WHEN d.open IS NULL OR d.open <= 0.0 THEN TRUE
+                ELSE FALSE
+            END AS is_suspended,
+            l.up_limit,
+            l.down_limit,
+            CASE
+                WHEN l.up_limit IS NOT NULL THEN d.open >= l.up_limit - 1e-6 AND d.high >= l.up_limit - 1e-6 AND d.low >= l.up_limit - 1e-6
+                ELSE FALSE
+            END AS is_limit_up_open_lock,
+            CASE
+                WHEN l.down_limit IS NOT NULL THEN d.open <= l.down_limit + 1e-6 AND d.high <= l.down_limit + 1e-6 AND d.low <= l.down_limit + 1e-6
+                ELSE FALSE
+            END AS is_limit_down_open_lock,
+            CASE
+                WHEN s.ts_code IS NOT NULL OR l.ts_code IS NOT NULL THEN 'official'
+                ELSE 'ohlc_fallback'
+            END AS source_priority
+        FROM daily_bar_pit AS d
+        LEFT JOIN suspend_key AS s
+            ON s.ts_code = d.security_id
+           AND s.trade_date = d.trade_date
+        LEFT JOIN limit_key AS l
+            ON l.ts_code = d.security_id
+           AND l.trade_date = d.trade_date
+        """
+    )
 
 
 def _preferred_attached_source(conn: Any, table_name: str) -> str | None:

@@ -27,7 +27,9 @@ class ConfigLoaderTest(unittest.TestCase):
 
         self.assertEqual(mandate.id, "a_share_long_only_eod")
         self.assertTrue(mandate.filters["exclude_st"])
-        self.assertTrue(mandate.risk["industry_neutral"])
+        self.assertEqual(mandate.risk["industry_neutral"]["status"], "enforced")
+        self.assertEqual(mandate.risk["size_control"]["status"], "planned")
+        self.assertEqual(mandate.risk["beta_band"]["status"], "planned")
 
     def test_core_thesis_registry_contains_current_research_lanes(self) -> None:
         thesis_ids = {
@@ -61,7 +63,7 @@ class ConfigLoaderTest(unittest.TestCase):
 
         self.assertEqual(sleeve.mandate_id, "a_share_long_only_eod")
         self.assertEqual(sleeve.thesis_id, "trend_leadership")
-        self.assertIn("industry", sleeve.neutralization)
+        self.assertEqual(sleeve.neutralization, ["industry"])
 
     def test_sleeve_references_descriptor_set_and_target(self) -> None:
         sleeve = load_sleeve(CONFIG_ROOT / "sleeves" / "trend_leadership_core.toml")

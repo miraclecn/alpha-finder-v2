@@ -9,6 +9,7 @@ from alpha_find_v2.models import (
     RegimeOverlay,
 )
 from alpha_find_v2.portfolio_promotion_replay import (
+    CorporateActionExceptionWindow,
     PortfolioPromotionReplay,
     PortfolioPromotionReplayInput,
     ReplayWalkForwardSplitDefinition,
@@ -207,6 +208,51 @@ class PortfolioPromotionReplayTest(unittest.TestCase):
         self.assertEqual(result.diagnostics.best_periods[0].trade_date, "2026-04-20")
         self.assertEqual(result.diagnostics.worst_periods[0].trade_date, "2026-04-13")
 
+    def test_replay_blocks_promotion_when_candidate_crosses_exception_window(self) -> None:
+        replay_input = PortfolioPromotionReplayInput(
+            baseline_portfolio=self._baseline_portfolio(),
+            candidate_portfolio=self._candidate_portfolio(),
+            artifacts=[self._slow_artifact(), self._event_artifact()],
+            periods_per_year=52,
+            benchmark_industry_weights_by_date=self._benchmark_industry_weights(),
+            cost_scenario_pass={"base": True},
+            regime_pass={"bull": True},
+            max_component_correlation=0.35,
+            correlation_to_existing_portfolio=0.25,
+            corporate_action_exception_windows=[
+                CorporateActionExceptionWindow(
+                    exception_id="DDD:20260409:20260410",
+                    asset_id="DDD",
+                    previous_trade_date="20260409",
+                    trade_date="20260410",
+                    severity="critical",
+                    triage_class="daily_pre_close_ex_right_without_ledger",
+                    recommended_action="quarantine_security_window_from_promotion",
+                )
+            ],
+        )
+
+        result = self.replay.replay(replay_input)
+
+        self.assertIsNotNone(result.market_data_quality)
+        assert result.market_data_quality is not None
+        self.assertTrue(result.market_data_quality.promotion_blocked)
+        self.assertEqual(
+            len(result.market_data_quality.corporate_action_exception_exposures),
+            1,
+        )
+        exposure = result.market_data_quality.corporate_action_exception_exposures[0]
+        self.assertEqual(exposure.portfolio_id, "candidate_portfolio")
+        self.assertEqual(exposure.asset_id, "DDD")
+        self.assertEqual(exposure.replay_trade_date, "2026-04-06")
+        self.assertEqual(exposure.interval_end_trade_date, "2026-04-13")
+        self.assertEqual(exposure.sleeve_ids, ["event"])
+        self.assertFalse(result.decision.passed)
+        self.assertIn(
+            "corporate_action_exception_exposure",
+            result.decision.failed_checks,
+        )
+
     def test_replay_reports_walk_forward_split_summaries_and_stability(self) -> None:
         replay_input = PortfolioPromotionReplayInput(
             baseline_portfolio=self._baseline_portfolio(),
@@ -288,7 +334,7 @@ class PortfolioPromotionReplayTest(unittest.TestCase):
             min(candidate_breadths),
         )
 
-    def test_replay_applies_overlay_exposure_to_candidate_weights_and_walk_forward(self) -> None:
+    def test_replay_applies_overlay_exposure_to_both_portfolio_paths_and_walk_forward(self) -> None:
         plain_input = PortfolioPromotionReplayInput(
             baseline_portfolio=self._baseline_portfolio(),
             candidate_portfolio=self._candidate_portfolio_with_overlay(),
@@ -356,14 +402,27 @@ class PortfolioPromotionReplayTest(unittest.TestCase):
             sum(step.executed_weights.values())
             for step in plain_result.candidate_simulation.steps
         ]
+        plain_baseline_weight_sums = [
+            sum(step.executed_weights.values())
+            for step in plain_result.baseline_simulation.steps
+        ]
         candidate_weight_sums = [
             sum(step.executed_weights.values())
             for step in overlay_result.candidate_simulation.steps
+        ]
+        baseline_weight_sums = [
+            sum(step.executed_weights.values())
+            for step in overlay_result.baseline_simulation.steps
         ]
         expected_overlay_weight_sums = [
             plain_weight_sums[0] * 1.0,
             plain_weight_sums[1] * 0.65,
             plain_weight_sums[2] * 0.35,
+        ]
+        expected_baseline_overlay_weight_sums = [
+            plain_baseline_weight_sums[0] * 1.0,
+            plain_baseline_weight_sums[1] * 0.65,
+            plain_baseline_weight_sums[2] * 0.35,
         ]
         expected_overlay_cash_weights = [
             1.0 - expected_overlay_weight_sums[0],
@@ -371,6 +430,8 @@ class PortfolioPromotionReplayTest(unittest.TestCase):
             1.0 - expected_overlay_weight_sums[2],
         ]
         for actual, expected in zip(candidate_weight_sums, expected_overlay_weight_sums):
+            self.assertAlmostEqual(actual, expected)
+        for actual, expected in zip(baseline_weight_sums, expected_baseline_overlay_weight_sums):
             self.assertAlmostEqual(actual, expected)
         for step, expected_cash_weight in zip(
             overlay_result.candidate_construction.steps,
@@ -390,6 +451,30 @@ class PortfolioPromotionReplayTest(unittest.TestCase):
             overlay_result.walk_forward.splits[1].candidate_summary.average_return,
             plain_result.walk_forward.splits[1].candidate_summary.average_return,
         )
+
+    def test_candidate_only_overlay_mode_blocks_promotion_decision(self) -> None:
+        replay_input = PortfolioPromotionReplayInput(
+            baseline_portfolio=self._baseline_portfolio(),
+            candidate_portfolio=self._candidate_portfolio_with_overlay(),
+            artifacts=[self._slow_artifact(), self._event_artifact()],
+            regime_overlay=self._regime_overlay(),
+            regime_overlay_observations=self._regime_overlay_observations(),
+            overlay_application_mode="candidate_only",
+            periods_per_year=52,
+            benchmark_industry_weights_by_date=self._benchmark_industry_weights(),
+            cost_scenario_pass={"base": True},
+            regime_pass={"bull": True},
+            max_component_correlation=0.35,
+            correlation_to_existing_portfolio=0.25,
+        )
+
+        result = self.replay.replay(replay_input)
+
+        self.assertIsNotNone(result.regime_overlay)
+        assert result.regime_overlay is not None
+        self.assertEqual(result.regime_overlay.application_mode, "candidate_only")
+        self.assertFalse(result.decision.passed)
+        self.assertIn("candidate_only_overlay_application", result.decision.failed_checks)
 
     def test_replay_reports_regime_buckets_and_weak_subperiods(self) -> None:
         replay_input = PortfolioPromotionReplayInput(

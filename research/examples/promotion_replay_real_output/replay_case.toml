@@ -17,6 +17,8 @@ periods_per_year = 52
 max_component_correlation = 0.60
 correlation_to_existing_portfolio = 0.55
 turnover_budget = 0.55
+market_data_source_db_path = "output/research_source.duckdb"
+market_data_quality_audit_path = "output/audits/market_data_quality_20260429.json"
 
 [[walk_forward_splits]]
 split_id = "anchor_20210305"

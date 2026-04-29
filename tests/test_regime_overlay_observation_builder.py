@@ -35,6 +35,129 @@ def _trading_days(start: date, count: int) -> list[str]:
 
 
 class RegimeOverlayObservationBuilderTest(unittest.TestCase):
+    def test_benchmark_returns_use_raw_close_times_adj_factor(self) -> None:
+        from alpha_find_v2.regime_overlay_observation_builder import (
+            _load_benchmark_daily_returns,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_db_path = Path(temp_dir) / "research_source.duckdb"
+            conn = duckdb.connect(str(source_db_path))
+            conn.execute("CREATE TABLE market_trade_calendar (trade_date VARCHAR)")
+            conn.execute(
+                """
+                CREATE TABLE benchmark_weight_snapshot_pit (
+                    benchmark_id VARCHAR,
+                    security_id VARCHAR,
+                    trade_date VARCHAR,
+                    weight DOUBLE
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE daily_bar_pit (
+                    security_id VARCHAR,
+                    trade_date VARCHAR,
+                    close DOUBLE,
+                    adj_factor DOUBLE,
+                    close_adj DOUBLE
+                )
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO market_trade_calendar VALUES
+                ('20260105'),
+                ('20260106')
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO benchmark_weight_snapshot_pit VALUES
+                ('CSI 800', 'AAA', '20260105', 100.0)
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO daily_bar_pit VALUES
+                ('AAA', '20260105', 10.0, 1.0, 100.0),
+                ('AAA', '20260106', 10.0, 2.0, 50.0)
+                """
+            )
+            conn.close()
+
+            returns = _load_benchmark_daily_returns(
+                source_db_path=source_db_path,
+                benchmark_id="CSI 800",
+                start_date="20260105",
+                end_date="20260106",
+            )
+
+            self.assertAlmostEqual(returns["20260106"], 1.0)
+
+    def test_benchmark_returns_do_not_double_adjust_qfq_fallback(self) -> None:
+        from alpha_find_v2.regime_overlay_observation_builder import (
+            _load_benchmark_daily_returns,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_db_path = Path(temp_dir) / "research_source.duckdb"
+            conn = duckdb.connect(str(source_db_path))
+            conn.execute("CREATE TABLE market_trade_calendar (trade_date VARCHAR)")
+            conn.execute(
+                """
+                CREATE TABLE benchmark_weight_snapshot_pit (
+                    benchmark_id VARCHAR,
+                    security_id VARCHAR,
+                    trade_date VARCHAR,
+                    weight DOUBLE
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE daily_bar_pit (
+                    security_id VARCHAR,
+                    trade_date VARCHAR,
+                    price_basis VARCHAR,
+                    close DOUBLE,
+                    adj_factor DOUBLE,
+                    close_adj DOUBLE
+                )
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO market_trade_calendar VALUES
+                ('20260105'),
+                ('20260106')
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO benchmark_weight_snapshot_pit VALUES
+                ('CSI 800', 'AAA', '20260105', 100.0)
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO daily_bar_pit VALUES
+                ('AAA', '20260105', 'qfq_fallback', 10.0, 2.0, 10.0),
+                ('AAA', '20260106', 'qfq_fallback', 12.0, 4.0, 12.0)
+                """
+            )
+            conn.close()
+
+            returns = _load_benchmark_daily_returns(
+                source_db_path=source_db_path,
+                benchmark_id="CSI 800",
+                start_date="20260105",
+                end_date="20260106",
+            )
+
+            self.assertAlmostEqual(returns["20260106"], 0.2)
+
     def test_builder_maps_green_inputs_into_repeatable_overlay_observations(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)

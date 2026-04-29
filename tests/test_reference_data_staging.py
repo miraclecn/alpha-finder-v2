@@ -12,6 +12,11 @@ class _FakeTushareClient:
     def __init__(self) -> None:
         self.member_calls: list[dict[str, object]] = []
         self.weight_calls: list[dict[str, object]] = []
+        self.dividend_calls: list[dict[str, object]] = []
+        self.stk_limit_calls: list[dict[str, object]] = []
+        self.suspend_d_calls: list[dict[str, object]] = []
+        self.share_float_calls: list[dict[str, object]] = []
+        self.repurchase_calls: list[dict[str, object]] = []
 
     def index_member_all(self, **kwargs: object) -> pd.DataFrame:
         self.member_calls.append(dict(kwargs))
@@ -120,8 +125,701 @@ class _FakeTushareClient:
             )
         return pd.DataFrame(columns=["index_code", "con_code", "trade_date", "weight"])
 
+    def dividend(self, **kwargs: object) -> pd.DataFrame:
+        self.dividend_calls.append(dict(kwargs))
+        offset = int(kwargs.get("offset", 0))
+        if offset == 0:
+            return pd.DataFrame(
+                [
+                    {
+                        "ts_code": "000001.SZ",
+                        "end_date": "20231231",
+                        "ann_date": "20240401",
+                        "div_proc": "实施",
+                        "stk_div": 0.0,
+                        "stk_bo_rate": 0.0,
+                        "stk_co_rate": 0.0,
+                        "cash_div": 0.19,
+                        "cash_div_tax": 0.20,
+                        "record_date": "20240509",
+                        "ex_date": "20240510",
+                        "pay_date": "20240510",
+                        "div_listdate": None,
+                    },
+                    {
+                        "ts_code": "000001.SZ",
+                        "end_date": "20231231",
+                        "ann_date": "20240401",
+                        "div_proc": "预案",
+                        "stk_div": 0.0,
+                        "stk_bo_rate": 0.0,
+                        "stk_co_rate": 0.0,
+                        "cash_div": 0.19,
+                        "cash_div_tax": 0.20,
+                        "record_date": "20240509",
+                        "ex_date": "20240510",
+                        "pay_date": "20240510",
+                        "div_listdate": None,
+                    },
+                ]
+            )
+        if offset == 2:
+            return pd.DataFrame(
+                [
+                    {
+                        "ts_code": "300001.SZ",
+                        "end_date": "20231231",
+                        "ann_date": "20240402",
+                        "div_proc": "实施",
+                        "stk_div": 0.0,
+                        "stk_bo_rate": 0.1,
+                        "stk_co_rate": 0.2,
+                        "cash_div": 0.0,
+                        "cash_div_tax": 0.0,
+                        "record_date": "20240514",
+                        "ex_date": "20240515",
+                        "pay_date": "",
+                        "div_listdate": "20240515",
+                    }
+                ]
+            )
+        return pd.DataFrame(
+            columns=[
+                "ts_code",
+                "end_date",
+                "ann_date",
+                "div_proc",
+                "stk_div",
+                "stk_bo_rate",
+                "stk_co_rate",
+                "cash_div",
+                "cash_div_tax",
+                "record_date",
+                "ex_date",
+                "pay_date",
+                "div_listdate",
+            ]
+        )
+
+    def stk_limit(self, **kwargs: object) -> pd.DataFrame:
+        self.stk_limit_calls.append(dict(kwargs))
+        return pd.DataFrame(
+            [
+                {
+                    "trade_date": "20240510",
+                    "ts_code": "000001.SZ",
+                    "up_limit": 11.0,
+                    "down_limit": 9.0,
+                }
+            ]
+        )
+
+    def suspend_d(self, **kwargs: object) -> pd.DataFrame:
+        self.suspend_d_calls.append(dict(kwargs))
+        return pd.DataFrame(
+            [
+                {
+                    "ts_code": "300001.SZ",
+                    "trade_date": "20240510",
+                    "suspend_timing": "上午停牌",
+                    "suspend_type": "停牌",
+                }
+            ]
+        )
+
+    def share_float(self, **kwargs: object) -> pd.DataFrame:
+        self.share_float_calls.append(dict(kwargs))
+        return pd.DataFrame(
+            [
+                {
+                    "ts_code": "000001.SZ",
+                    "ann_date": "20240501",
+                    "float_date": "20240520",
+                    "float_share": 100.0,
+                    "float_ratio": 1.0,
+                    "holder_name": "holder",
+                    "share_type": "首发原股东限售股份",
+                }
+            ]
+        )
+
+    def repurchase(self, **kwargs: object) -> pd.DataFrame:
+        self.repurchase_calls.append(dict(kwargs))
+        return pd.DataFrame(
+            [
+                {
+                    "ts_code": "000001.SZ",
+                    "ann_date": "20240503",
+                    "end_date": "20240521",
+                    "proc": "实施",
+                    "exp_date": "20240531",
+                    "vol": 10.0,
+                    "amount": 100.0,
+                    "high_limit": 12.0,
+                    "low_limit": 8.0,
+                }
+            ]
+        )
+
 
 class ReferenceDataStagingTest(unittest.TestCase):
+    def test_build_tushare_reference_db_stages_corporate_actions_and_tradeability(self) -> None:
+        from alpha_find_v2.reference_data_staging import (
+            BenchmarkReferenceDefinition,
+            build_tushare_reference_db,
+        )
+
+        client = _FakeTushareClient()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_db = Path(temp_dir) / "pit_reference.duckdb"
+
+            summary = build_tushare_reference_db(
+                target_db=target_db,
+                benchmarks=[
+                    BenchmarkReferenceDefinition(
+                        benchmark_id="CSI 800",
+                        index_code="000906.SH",
+                    )
+                ],
+                start_date="20240101",
+                end_date="20240229",
+                client=client,
+                stage_market_events=True,
+                member_page_size=2,
+                market_event_page_size=2,
+            )
+
+            self.assertEqual(summary["raw_dividend_rows"], 3)
+            self.assertEqual(summary["raw_stk_limit_rows"], 1)
+            self.assertEqual(summary["raw_suspend_d_rows"], 1)
+            self.assertEqual(summary["raw_share_float_rows"], 1)
+            self.assertEqual(summary["raw_repurchase_rows"], 1)
+            self.assertEqual(
+                sorted({call["offset"] for call in client.dividend_calls}),
+                [0, 2],
+            )
+
+            conn = duckdb.connect(str(target_db), read_only=True)
+            dividend_rows = conn.execute(
+                """
+                SELECT ts_code, div_proc, cash_div_tax, record_date, ex_date, pay_date
+                FROM raw_dividend
+                ORDER BY ts_code, div_proc
+                """
+            ).fetchall()
+            self.assertEqual(
+                dividend_rows,
+                [
+                    ("000001.SZ", "实施", 0.20, "20240509", "20240510", "20240510"),
+                    ("000001.SZ", "预案", 0.20, "20240509", "20240510", "20240510"),
+                    ("300001.SZ", "实施", 0.0, "20240514", "20240515", None),
+                ],
+            )
+            limit_rows = conn.execute(
+                "SELECT ts_code, trade_date, up_limit, down_limit FROM raw_stk_limit"
+            ).fetchall()
+            self.assertEqual(limit_rows, [("000001.SZ", "20240510", 11.0, 9.0)])
+            suspend_rows = conn.execute(
+                "SELECT ts_code, trade_date, suspend_type FROM raw_suspend_d"
+            ).fetchall()
+            self.assertEqual(suspend_rows, [("300001.SZ", "20240510", "停牌")])
+            registry_rows = conn.execute(
+                """
+                SELECT dataset_id, row_count
+                FROM reference_dataset_registry
+                WHERE dataset_id LIKE 'raw_%'
+                ORDER BY dataset_id
+                """
+            ).fetchall()
+            self.assertEqual(
+                registry_rows,
+                [
+                    ("raw_dividend", 3),
+                    ("raw_repurchase", 1),
+                    ("raw_share_float", 1),
+                    ("raw_stk_limit", 1),
+                    ("raw_suspend_d", 1),
+                ],
+            )
+            conn.close()
+
+    def test_build_tushare_reference_db_accepts_bounded_market_event_window(self) -> None:
+        from alpha_find_v2.reference_data_staging import (
+            BenchmarkReferenceDefinition,
+            build_tushare_reference_db,
+        )
+
+        client = _FakeTushareClient()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_db = Path(temp_dir) / "pit_reference.duckdb"
+
+            summary = build_tushare_reference_db(
+                target_db=target_db,
+                benchmarks=[
+                    BenchmarkReferenceDefinition(
+                        benchmark_id="CSI 800",
+                        index_code="000906.SH",
+                    )
+                ],
+                start_date="20240101",
+                end_date="20240229",
+                market_event_start_date="20240510",
+                market_event_end_date="20240511",
+                client=client,
+                stage_market_events=True,
+                member_page_size=2,
+                market_event_page_size=2,
+            )
+
+            self.assertEqual(summary["start_date"], "20240101")
+            self.assertEqual(summary["end_date"], "20240229")
+            self.assertEqual(summary["market_event_start_date"], "20240510")
+            self.assertEqual(summary["market_event_end_date"], "20240511")
+            self.assertEqual(
+                sorted({call["ex_date"] for call in client.dividend_calls}),
+                ["20240510", "20240511"],
+            )
+            self.assertEqual(
+                sorted({call["start_date"] for call in client.stk_limit_calls}),
+                ["20240510", "20240511"],
+            )
+            self.assertEqual(
+                [call["start_date"] for call in client.weight_calls],
+                ["20240101", "20240201"],
+            )
+
+    def test_refresh_tushare_market_event_tables_preserves_existing_pit_tables(self) -> None:
+        from alpha_find_v2.reference_data_staging import (
+            refresh_tushare_market_event_tables,
+        )
+
+        client = _FakeTushareClient()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_db = Path(temp_dir) / "pit_reference.duckdb"
+            conn = duckdb.connect(str(target_db))
+            try:
+                conn.execute(
+                    """
+                    CREATE TABLE industry_classification_pit (
+                        security_id VARCHAR,
+                        industry_schema VARCHAR,
+                        industry_code VARCHAR,
+                        effective_at VARCHAR,
+                        removed_at VARCHAR
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO industry_classification_pit VALUES
+                    ('000001.SZ', 'sw2021_l1', '801010.SI', '20200101', NULL)
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE industry_classification_pit_official_raw (
+                        security_id VARCHAR,
+                        industry_schema VARCHAR,
+                        industry_code VARCHAR,
+                        effective_at VARCHAR,
+                        removed_at VARCHAR
+                    )
+                    """
+                )
+            finally:
+                conn.close()
+
+            summary = refresh_tushare_market_event_tables(
+                target_db=target_db,
+                start_date="20240510",
+                end_date="20240511",
+                client=client,
+                market_event_page_size=2,
+            )
+
+            self.assertEqual(summary["raw_dividend_rows"], 3)
+            self.assertEqual(summary["raw_stk_limit_rows"], 1)
+            self.assertEqual(
+                sorted({call["ex_date"] for call in client.dividend_calls}),
+                ["20240510", "20240511"],
+            )
+            conn = duckdb.connect(str(target_db), read_only=True)
+            try:
+                industry_rows = conn.execute(
+                    "SELECT count(*) FROM industry_classification_pit"
+                ).fetchone()[0]
+                self.assertEqual(industry_rows, 1)
+                raw_rows = conn.execute("SELECT count(*) FROM raw_dividend").fetchone()[0]
+                self.assertEqual(raw_rows, 3)
+                source_provider = conn.execute(
+                    """
+                    SELECT source_provider
+                    FROM reference_dataset_registry
+                    WHERE dataset_id = 'industry_classification_pit'
+                    """
+                ).fetchone()[0]
+                self.assertEqual(source_provider, "official_shenwan_packet")
+            finally:
+                conn.close()
+
+    def test_refresh_tushare_market_event_tables_can_append_event_batches(self) -> None:
+        from alpha_find_v2.reference_data_staging import (
+            refresh_tushare_market_event_tables,
+        )
+
+        class _DateEchoEventClient:
+            def dividend(self, **kwargs: object) -> pd.DataFrame:
+                if int(kwargs.get("offset", 0)) > 0:
+                    return pd.DataFrame()
+                ex_date = str(kwargs["ex_date"])
+                return pd.DataFrame(
+                    [
+                        {
+                            "ts_code": f"{ex_date[-6:]}.SZ",
+                            "end_date": "20231231",
+                            "ann_date": ex_date,
+                            "div_proc": "实施",
+                            "stk_div": 0.0,
+                            "stk_bo_rate": 0.0,
+                            "stk_co_rate": 0.0,
+                            "cash_div": 0.1,
+                            "cash_div_tax": 0.1,
+                            "record_date": ex_date,
+                            "ex_date": ex_date,
+                            "pay_date": ex_date,
+                            "div_listdate": None,
+                        }
+                    ]
+                )
+
+            def stk_limit(self, **kwargs: object) -> pd.DataFrame:
+                return pd.DataFrame()
+
+            def suspend_d(self, **kwargs: object) -> pd.DataFrame:
+                return pd.DataFrame()
+
+            def share_float(self, **kwargs: object) -> pd.DataFrame:
+                return pd.DataFrame()
+
+            def repurchase(self, **kwargs: object) -> pd.DataFrame:
+                return pd.DataFrame()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_db = Path(temp_dir) / "pit_reference.duckdb"
+
+            refresh_tushare_market_event_tables(
+                target_db=target_db,
+                start_date="20240510",
+                end_date="20240510",
+                client=_DateEchoEventClient(),
+                market_event_page_size=1,
+            )
+            summary = refresh_tushare_market_event_tables(
+                target_db=target_db,
+                start_date="20240511",
+                end_date="20240511",
+                client=_DateEchoEventClient(),
+                market_event_page_size=1,
+                refresh_mode="append",
+            )
+
+            self.assertEqual(summary["refresh_mode"], "append")
+            conn = duckdb.connect(str(target_db), read_only=True)
+            try:
+                dividend_rows = conn.execute(
+                    """
+                    SELECT ts_code, ex_date
+                    FROM raw_dividend
+                    ORDER BY ex_date
+                    """
+                ).fetchall()
+                self.assertEqual(
+                    dividend_rows,
+                    [
+                        ("240510.SZ", "20240510"),
+                        ("240511.SZ", "20240511"),
+                    ],
+                )
+            finally:
+                conn.close()
+
+    def test_refresh_tushare_market_event_tables_can_skip_append_deduplication(self) -> None:
+        from alpha_find_v2.reference_data_staging import (
+            refresh_tushare_market_event_tables,
+        )
+
+        class _SameDividendClient:
+            def dividend(self, **kwargs: object) -> pd.DataFrame:
+                if int(kwargs.get("offset", 0)) > 0:
+                    return pd.DataFrame()
+                return pd.DataFrame(
+                    [
+                        {
+                            "ts_code": "000001.SZ",
+                            "end_date": "20231231",
+                            "ann_date": "20240501",
+                            "div_proc": "实施",
+                            "stk_div": 0.0,
+                            "stk_bo_rate": 0.0,
+                            "stk_co_rate": 0.0,
+                            "cash_div": 0.1,
+                            "cash_div_tax": 0.1,
+                            "record_date": "20240509",
+                            "ex_date": "20240510",
+                            "pay_date": "20240510",
+                            "div_listdate": None,
+                        }
+                    ]
+                )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_db = Path(temp_dir) / "pit_reference.duckdb"
+
+            refresh_tushare_market_event_tables(
+                target_db=target_db,
+                start_date="20240510",
+                end_date="20240510",
+                client=_SameDividendClient(),
+                market_event_tables=("raw_dividend",),
+            )
+            refresh_tushare_market_event_tables(
+                target_db=target_db,
+                start_date="20240510",
+                end_date="20240510",
+                client=_SameDividendClient(),
+                market_event_tables=("raw_dividend",),
+                refresh_mode="append",
+                deduplicate_on_append=False,
+            )
+
+            conn = duckdb.connect(str(target_db), read_only=True)
+            try:
+                raw_rows = conn.execute("SELECT count(*) FROM raw_dividend").fetchone()[0]
+                self.assertEqual(raw_rows, 2)
+            finally:
+                conn.close()
+
+    def test_refresh_tushare_market_event_tables_can_refresh_only_dividend(self) -> None:
+        from alpha_find_v2.reference_data_staging import (
+            refresh_tushare_market_event_tables,
+        )
+
+        class _DividendOnlyClient:
+            def __init__(self) -> None:
+                self.dividend_calls: list[dict[str, object]] = []
+
+            def dividend(self, **kwargs: object) -> pd.DataFrame:
+                self.dividend_calls.append(dict(kwargs))
+                if int(kwargs.get("offset", 0)) > 0:
+                    return pd.DataFrame()
+                return pd.DataFrame(
+                    [
+                        {
+                            "ts_code": "000001.SZ",
+                            "end_date": "20231231",
+                            "ann_date": "20240501",
+                            "div_proc": "实施",
+                            "stk_div": 0.0,
+                            "stk_bo_rate": 0.0,
+                            "stk_co_rate": 0.0,
+                            "cash_div": 0.1,
+                            "cash_div_tax": 0.1,
+                            "record_date": "20240509",
+                            "ex_date": kwargs["ex_date"],
+                            "pay_date": kwargs["ex_date"],
+                            "div_listdate": None,
+                        }
+                    ]
+                )
+
+            def stk_limit(self, **kwargs: object) -> pd.DataFrame:
+                raise AssertionError("stk_limit should not be queried")
+
+            def suspend_d(self, **kwargs: object) -> pd.DataFrame:
+                raise AssertionError("suspend_d should not be queried")
+
+            def share_float(self, **kwargs: object) -> pd.DataFrame:
+                raise AssertionError("share_float should not be queried")
+
+            def repurchase(self, **kwargs: object) -> pd.DataFrame:
+                raise AssertionError("repurchase should not be queried")
+
+        client = _DividendOnlyClient()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_db = Path(temp_dir) / "pit_reference.duckdb"
+
+            summary = refresh_tushare_market_event_tables(
+                target_db=target_db,
+                start_date="20240510",
+                end_date="20240510",
+                client=client,
+                market_event_tables=("raw_dividend",),
+            )
+
+            self.assertEqual(summary["raw_dividend_rows"], 1)
+            self.assertEqual(summary["raw_stk_limit_rows"], 0)
+            self.assertEqual(summary["market_event_tables"], ["raw_dividend"])
+            self.assertEqual(client.dividend_calls[0]["ex_date"], "20240510")
+
+    def test_refresh_tushare_market_event_tables_can_throttle_api_requests(self) -> None:
+        from alpha_find_v2.reference_data_staging import (
+            refresh_tushare_market_event_tables,
+        )
+
+        class _LimitOnlyClient:
+            def stk_limit(self, **kwargs: object) -> pd.DataFrame:
+                return pd.DataFrame()
+
+        sleeps: list[float] = []
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_db = Path(temp_dir) / "pit_reference.duckdb"
+
+            refresh_tushare_market_event_tables(
+                target_db=target_db,
+                start_date="20240510",
+                end_date="20240511",
+                client=_LimitOnlyClient(),
+                market_event_tables=("raw_stk_limit",),
+                request_interval_seconds=0.35,
+                sleep=sleeps.append,
+            )
+
+            self.assertEqual(sleeps, [0.35, 0.35])
+
+    def test_market_event_fetch_uses_api_safe_date_windows(self) -> None:
+        from alpha_find_v2.reference_data_staging import _fetch_market_event_rows
+
+        class _WindowStrictEventClient:
+            def __init__(self) -> None:
+                self.dividend_calls: list[dict[str, object]] = []
+                self.stk_limit_calls: list[dict[str, object]] = []
+                self.suspend_d_calls: list[dict[str, object]] = []
+                self.share_float_calls: list[dict[str, object]] = []
+                self.repurchase_calls: list[dict[str, object]] = []
+
+            def dividend(self, **kwargs: object) -> pd.DataFrame:
+                self.dividend_calls.append(dict(kwargs))
+                if "start_date" in kwargs or "end_date" in kwargs:
+                    raise ValueError("dividend requires ex_date")
+                if kwargs.get("ex_date") != "20240110":
+                    return pd.DataFrame(columns=["ts_code", "end_date", "ann_date"])
+                return pd.DataFrame(
+                    [
+                        {
+                            "ts_code": "000001.SZ",
+                            "end_date": "20231231",
+                            "ann_date": "20240105",
+                            "div_proc": "实施",
+                            "stk_div": 0.0,
+                            "stk_bo_rate": 0.0,
+                            "stk_co_rate": 0.0,
+                            "cash_div": 0.1,
+                            "cash_div_tax": 0.1,
+                            "record_date": "20240109",
+                            "ex_date": "20240110",
+                            "pay_date": "20240110",
+                            "div_listdate": None,
+                        }
+                    ]
+                )
+
+            def stk_limit(self, **kwargs: object) -> pd.DataFrame:
+                self.stk_limit_calls.append(dict(kwargs))
+                if kwargs.get("start_date") != kwargs.get("end_date"):
+                    raise ValueError("stk_limit requires daily windows")
+                return pd.DataFrame(
+                    [
+                        {
+                            "trade_date": kwargs["start_date"],
+                            "ts_code": "000001.SZ",
+                            "up_limit": 11.0,
+                            "down_limit": 9.0,
+                        }
+                    ]
+                )
+
+            def suspend_d(self, **kwargs: object) -> pd.DataFrame:
+                self.suspend_d_calls.append(dict(kwargs))
+                if kwargs.get("start_date") != kwargs.get("end_date"):
+                    raise ValueError("suspend_d requires daily windows")
+                return pd.DataFrame(
+                    [
+                        {
+                            "ts_code": "000001.SZ",
+                            "trade_date": kwargs["start_date"],
+                            "suspend_timing": "全天",
+                            "suspend_type": "停牌",
+                        }
+                    ]
+                )
+
+            def share_float(self, **kwargs: object) -> pd.DataFrame:
+                self.share_float_calls.append(dict(kwargs))
+                if "start_date" in kwargs or "end_date" in kwargs:
+                    raise ValueError("share_float requires ann_date")
+                return pd.DataFrame(
+                    [
+                        {
+                            "ts_code": "000001.SZ",
+                            "ann_date": kwargs["ann_date"],
+                            "float_date": kwargs["ann_date"],
+                            "float_share": 100.0,
+                            "float_ratio": 1.0,
+                            "holder_name": "holder",
+                            "share_type": "首发原股东限售股份",
+                        }
+                    ]
+                )
+
+            def repurchase(self, **kwargs: object) -> pd.DataFrame:
+                self.repurchase_calls.append(dict(kwargs))
+                if "start_date" in kwargs or "end_date" in kwargs:
+                    raise ValueError("repurchase requires ann_date")
+                return pd.DataFrame(
+                    [
+                        {
+                            "ts_code": "000001.SZ",
+                            "ann_date": kwargs["ann_date"],
+                            "end_date": kwargs["ann_date"],
+                            "proc": "实施",
+                            "exp_date": kwargs["ann_date"],
+                            "vol": 10.0,
+                            "amount": 100.0,
+                            "high_limit": 12.0,
+                            "low_limit": 8.0,
+                        }
+                    ]
+                )
+
+        client = _WindowStrictEventClient()
+
+        rows = _fetch_market_event_rows(
+            client=client,
+            start_date="20240101",
+            end_date="20240202",
+            page_size=2,
+        )
+
+        self.assertEqual(len(rows["raw_dividend"]), 1)
+        self.assertTrue(
+            all("ex_date" in call and "start_date" not in call for call in client.dividend_calls)
+        )
+        self.assertTrue(
+            all(call["start_date"] == call["end_date"] for call in client.stk_limit_calls)
+        )
+        self.assertTrue(
+            all(
+                "ann_date" in call and "start_date" not in call
+                for call in client.share_float_calls
+            )
+        )
+        self.assertTrue(
+            all(
+                "ann_date" in call and "start_date" not in call
+                for call in client.repurchase_calls
+            )
+        )
+
     def test_build_tushare_reference_db_materializes_pit_tables(self) -> None:
         from alpha_find_v2.reference_data_staging import (
             BenchmarkReferenceDefinition,

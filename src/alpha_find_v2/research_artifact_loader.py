@@ -32,6 +32,7 @@ from .models import (
     Sleeve,
 )
 from .portfolio_promotion_replay import (
+    CorporateActionExceptionWindow,
     PortfolioPromotionReplayInput,
     ReplayWalkForwardSplitDefinition,
     SleeveResearchArtifact,
@@ -68,6 +69,8 @@ class PortfolioPromotionReplayCaseDefinition:
     benchmark_state_path: str = ""
     benchmark_industry_weights_path: str = ""
     regime_overlay_observation_path: str = ""
+    market_data_source_db_path: str = ""
+    market_data_quality_audit_path: str = ""
     periods_per_year: int = 52
     cost_scenario_pass: dict[str, bool] = field(default_factory=dict)
     regime_pass: dict[str, bool] = field(default_factory=dict)
@@ -105,6 +108,10 @@ class PortfolioPromotionReplayCaseDefinition:
             ),
             regime_overlay_observation_path=str(
                 data.get("regime_overlay_observation_path", "")
+            ),
+            market_data_source_db_path=str(data.get("market_data_source_db_path", "")),
+            market_data_quality_audit_path=str(
+                data.get("market_data_quality_audit_path", "")
             ),
             periods_per_year=int(data.get("periods_per_year", 52)),
             cost_scenario_pass={
@@ -149,6 +156,7 @@ class SleeveResearchObservationRecord:
     target_weight: float
     entry_open: float
     exit_open: float
+    gross_holding_return: float | None = None
     cost_model_id: str = ""
     industry: str = ""
     entry_state: TradeLegState = field(default_factory=TradeLegState)
@@ -383,6 +391,11 @@ def load_portfolio_promotion_replay_case(
             "Replay case cannot define regime_overlay_observation_path without a candidate portfolio regime_overlay_id."
         )
 
+    corporate_action_exception_windows = (
+        _load_corporate_action_exception_windows(definition.market_data_source_db_path)
+        if definition.market_data_source_db_path.strip()
+        else []
+    )
     replay_input = PortfolioPromotionReplayInput(
         baseline_portfolio=baseline_portfolio,
         candidate_portfolio=candidate_portfolio,
@@ -401,6 +414,8 @@ def load_portfolio_promotion_replay_case(
         correlation_to_existing_portfolio=definition.correlation_to_existing_portfolio,
         turnover_budget=definition.turnover_budget,
         walk_forward_splits=definition.walk_forward_splits,
+        corporate_action_exception_windows=corporate_action_exception_windows,
+        market_data_quality_audit_path=definition.market_data_quality_audit_path,
     )
     return LoadedPortfolioPromotionReplayCase(
         definition=definition,
@@ -486,6 +501,11 @@ def _load_research_observation_record(data: JsonMap) -> SleeveResearchObservatio
         target_weight=float(data["target_weight"]),
         entry_open=float(data["entry_open"]),
         exit_open=float(data["exit_open"]),
+        gross_holding_return=(
+            None
+            if data.get("gross_holding_return") is None
+            else float(data["gross_holding_return"])
+        ),
         cost_model_id=str(data.get("cost_model_id", "")),
         industry=str(data.get("industry", "")),
         entry_state=_load_trade_leg_state(data.get("entry_state", {})),
@@ -560,3 +580,86 @@ def _load_gate(candidate_portfolio: PortfolioRecipe) -> PromotionGate | None:
     return load_promotion_gate(
         CONFIG_ROOT / "promotion_gates" / f"{candidate_portfolio.promotion_gate_id}.toml"
     )
+
+
+def _load_corporate_action_exception_windows(
+    source_db_path: Path | str,
+) -> list[CorporateActionExceptionWindow]:
+    import duckdb
+
+    target = _resolve_project_path(source_db_path)
+    conn = duckdb.connect(str(target), read_only=True)
+    try:
+        if not _table_exists(conn, "corporate_action_exception_ledger"):
+            return []
+        columns = {
+            str(row[1])
+            for row in conn.execute(
+                "PRAGMA table_info('corporate_action_exception_ledger')"
+            ).fetchall()
+        }
+        required = {
+            "exception_id",
+            "security_id",
+            "previous_trade_date",
+            "trade_date",
+        }
+        if not required.issubset(columns):
+            return []
+        severity_sql = "severity" if "severity" in columns else "'' AS severity"
+        triage_sql = "triage_class" if "triage_class" in columns else "'' AS triage_class"
+        recommended_action_sql = (
+            "recommended_action"
+            if "recommended_action" in columns
+            else "'' AS recommended_action"
+        )
+        rows = conn.execute(
+            f"""
+            SELECT
+                exception_id,
+                security_id,
+                previous_trade_date,
+                trade_date,
+                {severity_sql},
+                {triage_sql},
+                {recommended_action_sql}
+            FROM corporate_action_exception_ledger
+            ORDER BY trade_date, security_id, exception_id
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return [
+        CorporateActionExceptionWindow(
+            exception_id=str(exception_id),
+            asset_id=str(security_id),
+            previous_trade_date=str(previous_trade_date),
+            trade_date=str(trade_date),
+            severity=str(severity or ""),
+            triage_class=str(triage_class or ""),
+            recommended_action=str(recommended_action or ""),
+        )
+        for (
+            exception_id,
+            security_id,
+            previous_trade_date,
+            trade_date,
+            severity,
+            triage_class,
+            recommended_action,
+        ) in rows
+    ]
+
+
+def _table_exists(conn: object, table_name: str) -> bool:
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM duckdb_tables()
+        WHERE table_name = ?
+        LIMIT 1
+        """,
+        [table_name],
+    ).fetchone()
+    return row is not None

@@ -18,8 +18,12 @@ from alpha_find_v2.models import (
     PortfolioRecipe,
 )
 from alpha_find_v2.portfolio_backtester import (
+    DailyBar,
+    PortfolioBacktestResult,
     PortfolioBacktestInput,
     PortfolioBacktester,
+    PortfolioConstructionStep,
+    Position,
     load_portfolio_backtest_case,
 )
 from alpha_find_v2.portfolio_promotion_replay import (
@@ -27,7 +31,7 @@ from alpha_find_v2.portfolio_promotion_replay import (
     SleeveResearchStep,
     SleeveSignalRecord,
 )
-from alpha_find_v2.portfolio_simulator import TradeConstraintState
+from alpha_find_v2.portfolio_simulator import PortfolioSecuritySignal, TradeConstraintState
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -92,7 +96,7 @@ def _construction_model() -> PortfolioConstructionModel:
     )
 
 
-def _execution_policy() -> ExecutionPolicy:
+def _execution_policy(min_trade_weight: float = 0.0) -> ExecutionPolicy:
     return ExecutionPolicy(
         id="a_share_next_open_v1",
         name="Next open",
@@ -103,7 +107,7 @@ def _execution_policy() -> ExecutionPolicy:
         cash_policy="hold_residual_cash",
         participation_cap_source="mandate_or_cost_model",
         lot_size=100,
-        min_trade_weight=0.0,
+        min_trade_weight=min_trade_weight,
     )
 
 
@@ -118,6 +122,43 @@ def _cost_model(participation_cap: float = 1.0) -> CostModel:
         sell_slippage_bps=20.0,
         sell_stamp_duty_bps=10.0,
         participation_cap=participation_cap,
+    )
+
+
+def _zero_cost_model() -> CostModel:
+    return CostModel(
+        id="base",
+        name="Base",
+        description="No cost.",
+        buy_commission_bps=0.0,
+        sell_commission_bps=0.0,
+        buy_slippage_bps=0.0,
+        sell_slippage_bps=0.0,
+        sell_stamp_duty_bps=0.0,
+        participation_cap=1.0,
+    )
+
+
+def _daily_bar(asset_id: str, trade_date: str, price: float = 10.0) -> DailyBar:
+    return DailyBar(
+        security_id=asset_id,
+        trade_date=trade_date,
+        price_basis="unadjusted",
+        tradeability_source_priority="official",
+        board="main_board",
+        is_st=False,
+        open=price,
+        high=price,
+        low=price,
+        close=price,
+        pre_close=price,
+        adj_factor=1.0,
+        turnover_value_cny=100_000_000.0,
+        raw_open=price,
+        raw_high=price,
+        raw_low=price,
+        raw_close=price,
+        raw_pre_close=price,
     )
 
 
@@ -202,6 +243,78 @@ def _create_db(path: Path, rows: list[dict[str, object]]) -> None:
             )
             for row in rows
         ],
+    )
+    conn.close()
+
+
+def _add_corporate_action_ledger(path: Path, rows: list[tuple[object, ...]]) -> None:
+    conn = duckdb.connect(str(path))
+    conn.execute(
+        """
+        CREATE TABLE corporate_action_ledger (
+            action_id VARCHAR,
+            security_id VARCHAR,
+            action_type VARCHAR,
+            record_date VARCHAR,
+            book_date VARCHAR,
+            ex_date VARCHAR,
+            cash_per_share DOUBLE,
+            share_ratio DOUBLE,
+            source_table VARCHAR
+        )
+        """
+    )
+    conn.executemany(
+        "INSERT INTO corporate_action_ledger VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        rows,
+    )
+    conn.close()
+
+
+def _add_corporate_action_exception_ledger(
+    path: Path,
+    rows: list[tuple[object, ...]],
+) -> None:
+    conn = duckdb.connect(str(path))
+    conn.execute(
+        """
+        CREATE TABLE corporate_action_exception_ledger (
+            exception_id VARCHAR,
+            security_id VARCHAR,
+            previous_trade_date VARCHAR,
+            trade_date VARCHAR,
+            severity VARCHAR,
+            triage_class VARCHAR,
+            recommended_action VARCHAR
+        )
+        """
+    )
+    conn.executemany(
+        "INSERT INTO corporate_action_exception_ledger VALUES (?, ?, ?, ?, ?, ?, ?)",
+        rows,
+    )
+    conn.close()
+
+
+def _add_tradeability_state_daily(path: Path, rows: list[tuple[object, ...]]) -> None:
+    conn = duckdb.connect(str(path))
+    conn.execute(
+        """
+        CREATE TABLE tradeability_state_daily (
+            security_id VARCHAR,
+            trade_date VARCHAR,
+            is_suspended BOOLEAN,
+            up_limit DOUBLE,
+            down_limit DOUBLE,
+            is_limit_up_open_lock BOOLEAN,
+            is_limit_down_open_lock BOOLEAN,
+            source_priority VARCHAR
+        )
+        """
+    )
+    conn.executemany(
+        "INSERT INTO tradeability_state_daily VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        rows,
     )
     conn.close()
 
@@ -297,6 +410,140 @@ class PortfolioBacktesterTest(unittest.TestCase):
         ]
         self.assertEqual([fill.quantity for fill in sell_fills], [100.0, 200.0])
         self.assertAlmostEqual(result.daily_curve[-1].positions_value, 0.0)
+
+    def test_t_plus_one_blocks_same_day_sale_of_newly_bought_shares(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "source.duckdb"
+            _create_db(
+                db_path,
+                [
+                    {"security_id": "AAA", "trade_date": "20260106", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                ],
+            )
+            zero_cost = _zero_cost_model()
+            backtester = PortfolioBacktester(
+                mandate=_mandate(),
+                portfolio=_portfolio(),
+                construction_model=_construction_model(),
+                execution_policy=_execution_policy(),
+                default_cost_model=zero_cost,
+                cost_models={zero_cost.id: zero_cost},
+                source_db_path=db_path,
+            )
+            positions: dict[str, Position] = {}
+            bars = {("AAA", "20260106"): _daily_bar("AAA", "20260106", 10.0)}
+            result = PortfolioBacktestResult()
+
+            cash = backtester._rebalance(
+                cash=10_000.0,
+                positions=positions,
+                bars=bars,
+                trade_date="20260106",
+                step=PortfolioConstructionStep(
+                    trade_date="20260105",
+                    signals=[
+                        PortfolioSecuritySignal(
+                            asset_id="AAA",
+                            target_weight=1.0,
+                            realized_return=0.0,
+                            cost_model_id="base",
+                        )
+                    ],
+                ),
+                result=result,
+            )
+            cash = backtester._rebalance(
+                cash=cash,
+                positions=positions,
+                bars=bars,
+                trade_date="20260106",
+                step=PortfolioConstructionStep(trade_date="20260105", signals=[]),
+                result=result,
+            )
+
+        self.assertEqual([(fill.side, fill.quantity) for fill in result.fills], [("buy", 1000.0)])
+        self.assertEqual(positions["AAA"].shares, 1000.0)
+        self.assertEqual(positions["AAA"].available_shares, 0.0)
+        blocked = {(item.asset_id, item.side, item.reason) for item in result.diagnostics.blocked_orders}
+        self.assertIn(("AAA", "sell", "t_plus_one_unavailable_shares"), blocked)
+
+    def test_next_day_sell_uses_released_available_shares(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "source.duckdb"
+            _create_db(
+                db_path,
+                [
+                    {"security_id": "AAA", "trade_date": "20260105", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                    {"security_id": "AAA", "trade_date": "20260106", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                    {"security_id": "AAA", "trade_date": "20260107", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                ],
+            )
+
+            result = self._run(
+                db_path,
+                _artifact(
+                    [
+                        ("20260105", [("AAA", 1.0, 0.0)]),
+                        ("20260106", []),
+                    ]
+                ),
+                start_date="20260105",
+                end_date="20260107",
+                initial_cash_cny=10_000.0,
+                cost_model=_zero_cost_model(),
+            )
+
+        fills = [(fill.execution_date, fill.side, fill.quantity) for fill in result.fills]
+        self.assertEqual(fills, [("20260106", "buy", 1000.0), ("20260107", "sell", 1000.0)])
+        jan06_holding = next(
+            item for item in result.daily_holdings if item.trade_date == "20260106"
+        )
+        self.assertEqual(jan06_holding.available_shares, 0.0)
+
+    def test_min_trade_weight_skips_small_buy_and_non_liquidating_sell_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "source.duckdb"
+            _create_db(
+                db_path,
+                [
+                    {"security_id": "AAA", "trade_date": "20260105", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                    {"security_id": "BBB", "trade_date": "20260105", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                    {"security_id": "AAA", "trade_date": "20260106", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                    {"security_id": "BBB", "trade_date": "20260106", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                    {"security_id": "AAA", "trade_date": "20260107", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                    {"security_id": "BBB", "trade_date": "20260107", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                    {"security_id": "AAA", "trade_date": "20260108", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                    {"security_id": "BBB", "trade_date": "20260108", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                ],
+            )
+
+            result = self._run(
+                db_path,
+                _artifact(
+                    [
+                        ("20260105", [("AAA", 1.0, 0.0)]),
+                        ("20260106", [("AAA", 0.90, 0.0), ("BBB", 0.10, 0.0)]),
+                        ("20260107", []),
+                    ]
+                ),
+                start_date="20260105",
+                end_date="20260108",
+                initial_cash_cny=10_000.0,
+                cost_model=_zero_cost_model(),
+                execution_policy=_execution_policy(min_trade_weight=0.15),
+            )
+
+        fills = [(fill.execution_date, fill.asset_id, fill.side, fill.quantity) for fill in result.fills]
+        self.assertEqual(
+            fills,
+            [
+                ("20260106", "AAA", "buy", 1000.0),
+                ("20260108", "AAA", "sell", 1000.0),
+            ],
+        )
+        blocked = {(item.execution_date, item.asset_id, item.side, item.reason) for item in result.diagnostics.blocked_orders}
+        self.assertIn(("20260107", "AAA", "sell", "below_min_trade_weight"), blocked)
+        self.assertIn(("20260107", "BBB", "buy", "below_min_trade_weight"), blocked)
 
     def test_limit_blocks_and_suspension_carries_last_mark(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -562,7 +809,53 @@ class PortfolioBacktesterTest(unittest.TestCase):
 
         self.assertAlmostEqual(result.daily_curve[-1].equity, 12_000.0)
 
-    def test_adjusted_price_columns_drive_fills_and_marks_without_share_multiplier(self) -> None:
+    def test_qfq_and_tradeability_fallback_exposures_are_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "source.duckdb"
+            _create_db(
+                db_path,
+                [
+                    {"security_id": "AAA", "trade_date": "20260105", "price_basis": "qfq_fallback", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                    {"security_id": "AAA", "trade_date": "20260106", "price_basis": "qfq_fallback", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                    {"security_id": "AAA", "trade_date": "20260107", "price_basis": "qfq_fallback", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                ],
+            )
+            _add_tradeability_state_daily(
+                db_path,
+                [
+                    ("AAA", "20260105", False, 11.0, 9.0, False, False, "official"),
+                    ("AAA", "20260106", False, 11.0, 9.0, False, False, "ohlc_fallback"),
+                    ("AAA", "20260107", False, 11.0, 9.0, False, False, "ohlc_fallback"),
+                ],
+            )
+
+            result = self._run(
+                db_path,
+                _artifact([("20260105", [("AAA", 1.0, 0.0)])]),
+                start_date="20260105",
+                end_date="20260107",
+                initial_cash_cny=10_000.0,
+            )
+
+        self.assertGreater(
+            len(result.diagnostics.qfq_fallback_price_exposures),
+            0,
+        )
+        self.assertGreater(
+            len(result.diagnostics.tradeability_fallback_exposures),
+            0,
+        )
+        self.assertGreater(result.summary.qfq_fallback_price_exposure_count, 0)
+        self.assertGreater(result.summary.tradeability_fallback_exposure_count, 0)
+        self.assertEqual(
+            result.summary.market_data_fallback_exposure_count,
+            (
+                result.summary.qfq_fallback_price_exposure_count
+                + result.summary.tradeability_fallback_exposure_count
+            ),
+        )
+
+    def test_raw_price_columns_drive_fills_and_marks_when_adjusted_columns_exist(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = Path(temp_dir) / "source.duckdb"
             _create_db(
@@ -632,11 +925,11 @@ class PortfolioBacktesterTest(unittest.TestCase):
                 ),
             )
 
-        self.assertEqual(result.fills[0].price, 20.0)
-        self.assertEqual(result.fills[0].quantity, 500.0)
+        self.assertEqual(result.fills[0].price, 10.0)
+        self.assertEqual(result.fills[0].quantity, 1000.0)
         self.assertAlmostEqual(result.daily_curve[-1].equity, 12_000.0)
 
-    def test_limit_lock_checks_use_raw_prices_when_backtest_uses_adjusted_prices(self) -> None:
+    def test_limit_lock_checks_and_fills_use_raw_prices_when_adjusted_columns_exist(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = Path(temp_dir) / "source.duckdb"
             _create_db(
@@ -692,6 +985,304 @@ class PortfolioBacktesterTest(unittest.TestCase):
 
         self.assertEqual(len(result.fills), 1)
         self.assertFalse(result.diagnostics.blocked_orders)
+
+    def test_cash_dividend_books_cash_on_pay_date_for_record_date_holders(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "source.duckdb"
+            _create_db(
+                db_path,
+                [
+                    {"security_id": "AAA", "trade_date": "20260105", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                    {"security_id": "AAA", "trade_date": "20260106", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                    {"security_id": "AAA", "trade_date": "20260107", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                    {"security_id": "AAA", "trade_date": "20260108", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                ],
+            )
+            _add_corporate_action_ledger(
+                db_path,
+                [
+                    (
+                        "div1:cash",
+                        "AAA",
+                        "cash_dividend",
+                        "20260106",
+                        "20260107",
+                        "20260107",
+                        0.10,
+                        0.0,
+                        "test",
+                    )
+                ],
+            )
+
+            result = self._run(
+                db_path,
+                _artifact([("20260105", [("AAA", 1.0, 0.0)])]),
+                start_date="20260105",
+                end_date="20260108",
+                initial_cash_cny=10_000.0,
+                cost_model=CostModel(
+                    id="base",
+                    name="Base",
+                    description="No cost.",
+                    buy_commission_bps=0.0,
+                    sell_commission_bps=0.0,
+                    buy_slippage_bps=0.0,
+                    sell_slippage_bps=0.0,
+                    sell_stamp_duty_bps=0.0,
+                    participation_cap=1.0,
+                ),
+            )
+
+        pay_state = next(day for day in result.daily_curve if day.trade_date == "20260107")
+        self.assertAlmostEqual(pay_state.cash, 100.0)
+        self.assertAlmostEqual(result.daily_curve[-1].equity, 10_100.0)
+
+    def test_cash_dividend_does_not_book_for_position_bought_after_record_date(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "source.duckdb"
+            _create_db(
+                db_path,
+                [
+                    {"security_id": "AAA", "trade_date": "20260106", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                    {"security_id": "AAA", "trade_date": "20260107", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                    {"security_id": "AAA", "trade_date": "20260108", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                ],
+            )
+            _add_corporate_action_ledger(
+                db_path,
+                [
+                    (
+                        "div-before-start:cash",
+                        "AAA",
+                        "cash_dividend",
+                        "20260105",
+                        "20260108",
+                        "20260106",
+                        0.10,
+                        0.0,
+                        "test",
+                    )
+                ],
+            )
+
+            result = self._run(
+                db_path,
+                _artifact([("20260106", [("AAA", 1.0, 0.0)])]),
+                start_date="20260106",
+                end_date="20260108",
+                initial_cash_cny=10_000.0,
+                cost_model=CostModel(
+                    id="base",
+                    name="Base",
+                    description="No cost.",
+                    buy_commission_bps=0.0,
+                    sell_commission_bps=0.0,
+                    buy_slippage_bps=0.0,
+                    sell_slippage_bps=0.0,
+                    sell_stamp_duty_bps=0.0,
+                    participation_cap=1.0,
+                ),
+            )
+
+        pay_state = next(day for day in result.daily_curve if day.trade_date == "20260108")
+        self.assertAlmostEqual(pay_state.cash, 0.0)
+        self.assertAlmostEqual(result.daily_curve[-1].equity, 10_000.0)
+
+    def test_share_dividend_adjusts_position_shares_on_ex_date(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "source.duckdb"
+            _create_db(
+                db_path,
+                [
+                    {"security_id": "AAA", "trade_date": "20260105", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                    {"security_id": "AAA", "trade_date": "20260106", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                    {"security_id": "AAA", "trade_date": "20260107", "open": 6.67, "high": 6.67, "low": 6.67, "close": 6.67, "pre_close": 10.0},
+                ],
+            )
+            _add_corporate_action_ledger(
+                db_path,
+                [
+                    (
+                        "div1:share",
+                        "AAA",
+                        "share_dividend",
+                        "20260106",
+                        "20260107",
+                        "20260107",
+                        0.0,
+                        0.5,
+                        "test",
+                    )
+                ],
+            )
+
+            result = self._run(
+                db_path,
+                _artifact([("20260105", [("AAA", 1.0, 0.0)])]),
+                start_date="20260105",
+                end_date="20260107",
+                initial_cash_cny=10_000.0,
+                cost_model=CostModel(
+                    id="base",
+                    name="Base",
+                    description="No cost.",
+                    buy_commission_bps=0.0,
+                    sell_commission_bps=0.0,
+                    buy_slippage_bps=0.0,
+                    sell_slippage_bps=0.0,
+                    sell_stamp_duty_bps=0.0,
+                    participation_cap=1.0,
+                ),
+            )
+
+        holding = next(
+            item
+            for item in result.daily_holdings
+            if item.trade_date == "20260107" and item.asset_id == "AAA"
+        )
+        self.assertEqual(holding.shares, 1500.0)
+        self.assertAlmostEqual(result.daily_curve[-1].positions_value, 10_005.0)
+
+    def test_official_tradeability_state_blocks_suspended_open_even_when_ohlc_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "source.duckdb"
+            _create_db(
+                db_path,
+                [
+                    {"security_id": "AAA", "trade_date": "20260105", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                    {"security_id": "AAA", "trade_date": "20260106", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                ],
+            )
+            _add_tradeability_state_daily(
+                db_path,
+                [("AAA", "20260106", True, None, None, False, False, "official")],
+            )
+
+            result = self._run(
+                db_path,
+                _artifact([("20260105", [("AAA", 1.0, 0.0)])]),
+                start_date="20260105",
+                end_date="20260106",
+                initial_cash_cny=10_000.0,
+            )
+
+        self.assertFalse(result.fills)
+        self.assertEqual(result.diagnostics.blocked_orders[0].reason, "suspended_or_missing_open")
+
+    def test_adj_factor_jump_without_matching_ledger_emits_unresolved_action_diagnostic(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "source.duckdb"
+            _create_db(
+                db_path,
+                [
+                    {"security_id": "AAA", "trade_date": "20260105", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0, "adj_factor": 1.0},
+                    {"security_id": "AAA", "trade_date": "20260106", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0, "adj_factor": 1.0},
+                    {"security_id": "AAA", "trade_date": "20260107", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0, "adj_factor": 2.0},
+                ],
+            )
+
+            result = self._run(
+                db_path,
+                _artifact([("20260105", [("AAA", 1.0, 0.0)])]),
+                start_date="20260105",
+                end_date="20260107",
+                initial_cash_cny=10_000.0,
+            )
+
+        self.assertEqual(len(result.diagnostics.unresolved_corporate_actions), 1)
+        diagnostic = result.diagnostics.unresolved_corporate_actions[0]
+        self.assertEqual(diagnostic.asset_id, "AAA")
+        self.assertEqual(diagnostic.trade_date, "20260107")
+        self.assertEqual(diagnostic.reason, "unresolved_corporate_action")
+
+    def test_adj_factor_jump_after_no_bar_action_window_is_not_unresolved(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "source.duckdb"
+            _create_db(
+                db_path,
+                [
+                    {"security_id": "AAA", "trade_date": "20260105", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0, "adj_factor": 1.0},
+                    {"security_id": "AAA", "trade_date": "20260110", "open": 5.0, "high": 5.0, "low": 5.0, "close": 5.0, "pre_close": 10.0, "adj_factor": 2.0},
+                ],
+            )
+            conn = duckdb.connect(str(db_path))
+            try:
+                conn.execute("INSERT INTO market_trade_calendar VALUES ('20260106')")
+            finally:
+                conn.close()
+            _add_corporate_action_ledger(
+                db_path,
+                [
+                    (
+                        "split-during-suspension:share",
+                        "AAA",
+                        "share_dividend",
+                        "20260105",
+                        "20260106",
+                        "20260106",
+                        0.0,
+                        1.0,
+                        "test",
+                    )
+                ],
+            )
+
+            result = self._run(
+                db_path,
+                _artifact([("20260105", [("AAA", 1.0, 0.0)])]),
+                start_date="20260105",
+                end_date="20260110",
+                initial_cash_cny=10_000.0,
+            )
+
+        self.assertEqual(result.diagnostics.unresolved_corporate_actions, [])
+
+    def test_held_exception_ledger_window_emits_backtest_diagnostic(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "source.duckdb"
+            _create_db(
+                db_path,
+                [
+                    {"security_id": "AAA", "trade_date": "20260105", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0, "adj_factor": 1.0},
+                    {"security_id": "AAA", "trade_date": "20260106", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0, "adj_factor": 1.0},
+                    {"security_id": "AAA", "trade_date": "20260107", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0, "adj_factor": 1.0},
+                ],
+            )
+            _add_corporate_action_exception_ledger(
+                db_path,
+                [
+                    (
+                        "AAA:20260106:20260107:adj_factor_exception",
+                        "AAA",
+                        "20260106",
+                        "20260107",
+                        "critical",
+                        "daily_pre_close_ex_right_without_ledger",
+                        "quarantine_security_window_from_promotion",
+                    )
+                ],
+            )
+
+            result = self._run(
+                db_path,
+                _artifact([("20260105", [("AAA", 1.0, 0.0)])]),
+                start_date="20260105",
+                end_date="20260107",
+                initial_cash_cny=10_000.0,
+            )
+
+        self.assertEqual(
+            len(result.diagnostics.corporate_action_exception_exposures),
+            1,
+        )
+        diagnostic = result.diagnostics.corporate_action_exception_exposures[0]
+        self.assertEqual(diagnostic.asset_id, "AAA")
+        self.assertEqual(diagnostic.trade_date, "20260107")
+        self.assertEqual(diagnostic.previous_trade_date, "20260106")
+        self.assertEqual(diagnostic.severity, "critical")
+        self.assertEqual(diagnostic.reason, "corporate_action_exception_exposure")
+        self.assertEqual(result.summary.corporate_action_exception_exposure_count, 1)
 
     def test_multi_sleeve_backtest_requires_artifacts_on_union_decision_calendar(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -883,6 +1474,11 @@ class PortfolioBacktesterTest(unittest.TestCase):
         average_equity = statistics.mean(state.equity for state in result.daily_curve)
 
         summary = result.summary
+        self.assertEqual(summary.portfolio_return_clock, "next_open_execution_close_mark")
+        self.assertEqual(
+            summary.benchmark_return_clock,
+            "previous_close_to_current_close_with_previous_benchmark_weights",
+        )
         self.assertAlmostEqual(summary.risk_free_rate_annual, 0.02)
         self.assertAlmostEqual(summary.sharpe, (summary.annualized_return - 0.02) / expected_volatility)
         self.assertNotAlmostEqual(summary.information_ratio, summary.sharpe)
@@ -893,6 +1489,42 @@ class PortfolioBacktesterTest(unittest.TestCase):
         self.assertAlmostEqual(summary.buy_turnover, 10_000.0 / average_equity)
         self.assertAlmostEqual(summary.sell_turnover, 0.0)
         self.assertAlmostEqual(summary.turnover, 5_000.0 / average_equity)
+
+    def test_summary_benchmark_return_does_not_double_adjust_qfq_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "source.duckdb"
+            _create_db(
+                db_path,
+                [
+                    {"security_id": "AAA", "trade_date": "20260105", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                    {"security_id": "AAA", "trade_date": "20260106", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                    {"security_id": "BBB", "trade_date": "20260105", "price_basis": "qfq_fallback", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0, "adj_factor": 2.0},
+                    {"security_id": "BBB", "trade_date": "20260106", "price_basis": "qfq_fallback", "open": 12.0, "high": 12.0, "low": 12.0, "close": 12.0, "pre_close": 10.0, "adj_factor": 4.0},
+                ],
+            )
+
+            result = PortfolioBacktester(
+                mandate=_mandate(),
+                portfolio=_portfolio(),
+                construction_model=_construction_model(),
+                execution_policy=_execution_policy(),
+                default_cost_model=_cost_model(),
+                cost_models={"base": _cost_model()},
+                source_db_path=db_path,
+            ).run(
+                PortfolioBacktestInput(
+                    portfolio=_portfolio(),
+                    artifacts=[_artifact([("20260105", [("AAA", 1.0, 0.0)])])],
+                    start_date="20260105",
+                    end_date="20260106",
+                    initial_cash_cny=10_000.0,
+                    benchmark_constituent_weights_by_date={
+                        "20260105": {"BBB": 1.0},
+                    },
+                )
+            )
+
+        self.assertAlmostEqual(result.summary.benchmark_annualized_return, 0.2 * 252.0)
 
     def test_summary_information_ratio_is_zero_without_benchmark_returns(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1062,13 +1694,14 @@ output_path = "{output_path}"
         initial_cash_cny: float,
         mandate: Mandate | None = None,
         cost_model: CostModel | None = None,
+        execution_policy: ExecutionPolicy | None = None,
     ):
         model = cost_model or _cost_model()
         return PortfolioBacktester(
             mandate=mandate or _mandate(),
             portfolio=_portfolio(),
             construction_model=_construction_model(),
-            execution_policy=_execution_policy(),
+            execution_policy=execution_policy or _execution_policy(),
             default_cost_model=model,
             cost_models={model.id: model},
             source_db_path=db_path,

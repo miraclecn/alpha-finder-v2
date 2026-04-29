@@ -611,6 +611,29 @@ def _load_trade_calendar(source_db_path: Path) -> list[str]:
     return calendar
 
 
+def _table_columns(conn: object, table_name: str) -> set[str]:
+    rows = conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
+    return {str(row[1]) for row in rows}
+
+
+def _pit_adjusted_close_sql(alias: str, columns: set[str]) -> str:
+    if {"close", "adj_factor"}.issubset(columns):
+        close_fallback = f"{alias}.close_adj" if "close_adj" in columns else f"{alias}.close"
+        price_basis_is_raw = (
+            f"COALESCE({alias}.price_basis, 'unadjusted') = 'unadjusted'"
+            if "price_basis" in columns
+            else "TRUE"
+        )
+        return (
+            f"CASE WHEN {alias}.close IS NOT NULL AND {alias}.adj_factor IS NOT NULL "
+            f"AND {alias}.adj_factor > 0.0 AND {price_basis_is_raw} "
+            f"THEN {alias}.close * {alias}.adj_factor ELSE {close_fallback} END"
+        )
+    if "close_adj" in columns:
+        return f"{alias}.close_adj"
+    return f"{alias}.close"
+
+
 def _load_bar_history(
     *,
     source_db_path: Path,
@@ -625,6 +648,8 @@ def _load_bar_history(
     placeholders = ", ".join("?" for _ in security_ids)
     conn = duckdb.connect(str(source_db_path), read_only=True)
     try:
+        daily_bar_columns = _table_columns(conn, "daily_bar_pit")
+        adjusted_close_sql = _pit_adjusted_close_sql("daily_bar_pit", daily_bar_columns)
         rows = conn.execute(
             f"""
             SELECT
@@ -636,7 +661,7 @@ def _load_bar_history(
                 open,
                 high,
                 low,
-                close_adj
+                {adjusted_close_sql} AS close_adj
             FROM daily_bar_pit
             WHERE security_id IN ({placeholders})
               AND trade_date BETWEEN ? AND ?
@@ -681,8 +706,11 @@ def _load_benchmark_daily_returns(
 
     conn = duckdb.connect(str(source_db_path), read_only=True)
     try:
+        daily_bar_columns = _table_columns(conn, "daily_bar_pit")
+        current_adjusted_close_sql = _pit_adjusted_close_sql("current", daily_bar_columns)
+        prev_adjusted_close_sql = _pit_adjusted_close_sql("prev", daily_bar_columns)
         rows = conn.execute(
-            """
+            f"""
             WITH calendar AS (
                 SELECT trade_date
                 FROM market_trade_calendar
@@ -710,20 +738,20 @@ def _load_benchmark_daily_returns(
                 SELECT
                     current.security_id,
                     current.trade_date,
-                    current.close_adj,
+                    {current_adjusted_close_sql} AS close_adj,
                     (
-                        SELECT prev.close_adj
+                        SELECT {prev_adjusted_close_sql}
                         FROM daily_bar_pit AS prev
                         WHERE prev.security_id = current.security_id
                           AND prev.trade_date < current.trade_date
-                          AND prev.close_adj IS NOT NULL
-                          AND prev.close_adj > 0.0
+                          AND {prev_adjusted_close_sql} IS NOT NULL
+                          AND {prev_adjusted_close_sql} > 0.0
                         ORDER BY prev.trade_date DESC
                         LIMIT 1
                     ) AS previous_close_adj
                 FROM daily_bar_pit AS current
                 WHERE current.trade_date BETWEEN ? AND ?
-                  AND current.close_adj IS NOT NULL
+                  AND {current_adjusted_close_sql} IS NOT NULL
             ) AS bars
                 ON bars.security_id = weights.security_id
                AND bars.trade_date = snapshots.trade_date

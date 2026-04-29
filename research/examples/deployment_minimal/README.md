@@ -46,7 +46,7 @@ Files:
   honest PIT-safe interval in the staged data spine
 - `executable_signal_case_trend_live_candidate_with_overlay.toml`: persisted
   deployment case for the frozen trend-only live candidate; it carries a hard
-  multi-year-audit gate and now builds because the checked-in audit passes
+  multi-year-audit gate backed by the checked-in portfolio-evidence audit
 - `run_manifest_case_trend_live_candidate_2026_04_20.toml`: run-manifest
   build case for the frozen trend-only live candidate
 - `trend_leadership_live_candidate_v1.toml`: versioned live-candidate bundle
@@ -58,7 +58,8 @@ Files:
   currently attached to the frozen candidate
 - `trend_leadership_multi_year_validation_audit_v1.json`: current audit
   verdict for the frozen trend-only live candidate; it covers `2021-03-05`
-  through `2026-03-19` and reports no release blockers
+  through `2026-03-19` and reports zero corporate-action-exception,
+  qfq-fallback, and tradeability-fallback portfolio exposures
 - `shadow_live_journal_trend_leadership_v1.json`: first shadow-live journal
   record that keeps the frozen candidate attached to one traced cycle
 - `decay_watch_case.toml`: binds a promoted expectation snapshot and a recent realized window into a decay-watch record
@@ -112,13 +113,17 @@ It uses generated benchmark state and generated trend sleeve artifacts, but it s
 Promotion replay remains a promotion-gate comparison built from artifact
 forward returns. The daily `run-portfolio-backtest` cases are the only
 acceptable historical equity-curve proof before shadow-live because they
-execute next-open orders, use adjusted `daily_bar_pit` OHLC columns for fills
-and daily marks, and record cash, costs, blocked orders, partial fills, and
-drawdown from the portfolio ledger.
+execute next-open orders, use raw unadjusted `daily_bar_pit` OHLC for fills
+and daily marks, book explicit corporate actions, and record cash, costs,
+blocked orders, partial fills, market-data fallback exposure, and drawdown
+from the portfolio ledger.
 The frozen live-candidate paper-trade case is stricter:
 it requires the attached multi-year validation audit gate before rebuilding a
-fresh signal. The checked-in audit now passes, so the gated signal and manifest
-cases build from the frozen candidate bundle.
+fresh signal. The checked-in audit is currently clean on the data-quality
+release gates because the attached daily backtest reports zero
+corporate-action-exception, qfq-fallback, and tradeability-fallback exposures.
+That only clears data-contamination risk; the strategy still needs separate
+performance evidence before probation capital.
 The audit file is no longer intended to be hand-maintained:
 `build-multi-year-validation-audit` now rebuilds it from the attached
 benchmark-state, trend-observation inputs, the generated overlay-observation
@@ -130,7 +135,10 @@ covers `2,364,800 / 2,364,800` staged constituent-days, and the benchmark-state
 build succeeds across the widened live-candidate input window. The
 `302132.SZ` PIT industry gap is resolved through `security_code_alias_backfill`
 from legacy `300114.SZ`, Beijing-board names are excluded, and the frozen
-live-candidate audit now covers `5.0404` calendar years with no blockers.
+live-candidate audit now covers `5.0404` calendar years. As of the 2026-04-29
+hardening pass, trend input generation excludes `373` corporate-action
+exception candidates and `5,663` qfq-fallback candidates; the rebuilt daily
+backtests and multi-year audit report zero fallback portfolio exposures.
 
 For live-readiness hardening, the frozen trend-only candidate bundle and its
 shadow-live journal are now checked in alongside:

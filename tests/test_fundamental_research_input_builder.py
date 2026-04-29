@@ -254,6 +254,31 @@ def _create_fundamental_source_db(path: Path, trade_dates: list[str]) -> None:
     conn.close()
 
 
+def _add_corporate_action_exception_ledger(
+    path: Path,
+    rows: list[tuple[str, str, str, str, str, str, str]],
+) -> None:
+    conn = duckdb.connect(str(path))
+    conn.execute(
+        """
+        CREATE TABLE corporate_action_exception_ledger (
+            exception_id VARCHAR,
+            security_id VARCHAR,
+            previous_trade_date VARCHAR,
+            trade_date VARCHAR,
+            severity VARCHAR,
+            triage_class VARCHAR,
+            recommended_action VARCHAR
+        )
+        """
+    )
+    conn.executemany(
+        "INSERT INTO corporate_action_exception_ledger VALUES (?, ?, ?, ?, ?, ?, ?)",
+        rows,
+    )
+    conn.close()
+
+
 def _write_residual_component_snapshot(
     path: Path,
     *,
@@ -419,7 +444,7 @@ class FundamentalResearchInputBuilderTest(unittest.TestCase):
             first_step = result.observation_input.steps[0]
             self.assertEqual([record.asset_id for record in first_step.records], ["600001.SH", "600003.SH"])
             self.assertEqual([record.rank for record in first_step.records], [1, 2])
-            self.assertTrue(all(isclose(record.target_weight, 0.5) for record in first_step.records))
+            self.assertTrue(all(isclose(record.target_weight, 0.08) for record in first_step.records))
             self.assertEqual([record.industry for record in first_step.records], ["bank", "tech"])
             self.assertEqual(
                 first_step.records[0].residual_components,
@@ -435,6 +460,87 @@ class FundamentalResearchInputBuilderTest(unittest.TestCase):
             self.assertEqual(
                 [record.asset_id for record in roundtrip.steps[0].records],
                 ["600001.SH", "600003.SH"],
+            )
+
+    def test_builder_excludes_candidate_crossing_exception_ledger_window(self) -> None:
+        from alpha_find_v2.fundamental_research_input_builder import (
+            build_fundamental_research_observation_input,
+            load_fundamental_research_input_build_case,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            source_db = temp_root / "research_source.duckdb"
+            case_path = temp_root / "build_case.toml"
+            sleeve_path = temp_root / "fundamental_rerating_core_test.toml"
+            residual_snapshot_path = temp_root / "residual_components.json"
+            trade_dates = _trading_days(date(2024, 1, 2), 70)
+            first_signal = trade_dates[20]
+            entry_trade_date = trade_dates[21]
+            _create_fundamental_source_db(source_db, trade_dates)
+            _write_temp_fundamental_sleeve(sleeve_path)
+            _write_residual_component_snapshot(
+                residual_snapshot_path,
+                target_id="open_t1_to_open_t20_residual_net_cost",
+                trade_dates=[first_signal],
+                security_ids=["600001.SH", "600002.SH", "600003.SH", "600004.SH"],
+            )
+            _add_corporate_action_exception_ledger(
+                source_db,
+                [
+                    (
+                        "exception-600001-entry",
+                        "600001.SH",
+                        first_signal,
+                        entry_trade_date,
+                        "critical",
+                        "daily_pre_close_ex_right_without_ledger",
+                        "quarantine_security_window_from_promotion",
+                    )
+                ],
+            )
+
+            case_path.write_text(
+                "\n".join(
+                    [
+                        'schema_version = 1',
+                        'artifact_type = "fundamental_research_input_build_case"',
+                        'case_id = "fundamental_exception_quarantine_case"',
+                        'description = "Quarantine unresolved corporate-action windows before fundamental labels are emitted."',
+                        f'sleeve_path = "{sleeve_path}"',
+                        f'source_db_path = "{source_db}"',
+                        f'output_path = "{temp_root / "fundamental_input.json"}"',
+                        f'residual_component_snapshot_path = "{residual_snapshot_path}"',
+                        f'start_date = "{first_signal}"',
+                        f'end_date = "{first_signal}"',
+                        'min_listing_days = 120',
+                        'lookback_days = 20',
+                        'turnover_window_days = 20',
+                        'rebalance_stride = 5',
+                        'industry_label_source = "industry_classification_pit"',
+                        'industry_schema = "sw2021_l1"',
+                        'limit_lock_mode = "disabled"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            loaded_case = load_fundamental_research_input_build_case(case_path)
+            result = build_fundamental_research_observation_input(loaded_case)
+
+            first_step = result.observation_input.steps[0]
+            self.assertNotIn(
+                "600001.SH",
+                [record.asset_id for record in first_step.records],
+            )
+            self.assertEqual(
+                [record.asset_id for record in first_step.records],
+                ["600003.SH", "600002.SH"],
+            )
+            self.assertIn(
+                "corporate_action_exception_quarantine_excluded_count=1",
+                result.warnings,
             )
 
     def test_builder_treats_intraday_industry_changes_as_not_same_day_usable(self) -> None:

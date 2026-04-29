@@ -62,16 +62,34 @@ Promotion replay is not a live-equity proof. It uses the sleeve artifact's
 forward `realized_return` field on each replay step, so it is valid for
 comparing candidate sleeve allocations on a shared research calendar but not
 for proving an account-level historical equity curve.
+Replay promotion snapshots therefore label `research_ir`, `research_tstat`,
+and `metric_basis = "artifact_period_absolute_net_return"` explicitly. Those
+fields are research replay evidence, not benchmark-relative tradable portfolio
+IR.
 
 The real historical performance proof lane is:
 
 `artifacts -> constructor -> daily portfolio backtester -> ledger metrics`
 
 That daily backtester advances one market session at a time, executes the
-decision-close target on the next trading day open, uses the adjusted
-`daily_bar_pit` OHLC columns as the research price basis for fills and marks,
-keeps raw OHLC fields for A-share open-limit checks, and ignores artifact
-`realized_return` for PnL.
+decision-close target on the next trading day open, uses raw unadjusted
+`daily_bar_pit` OHLC for fills, marks, and A-share open-limit checks, books
+staged cash/share corporate actions explicitly, and ignores artifact
+`realized_return` for PnL. It maintains a T+1 `available_shares` ledger,
+enforces `min_trade_weight`, reports benchmark-relative active metrics, and
+labels the portfolio and benchmark return clocks in the backtest summary. It
+also reports any actual daily holding that crosses a
+`corporate_action_exception_ledger` trade date under backtest diagnostics;
+those rows are not converted into cash or share bookings.
+
+The research input builders enforce the same quarantine before artifacts are
+created. When the bound research-source DuckDB contains
+`corporate_action_exception_ledger`, `build-trend-research-input` excludes
+candidate observations whose trend feature/label interval intersects an
+exception window, and `build-fundamental-research-input` excludes candidate
+observations whose decision-to-exit label interval intersects one. The builder
+warning records the excluded count. This prevents generated sleeves from
+learning or tuning on unresolved adjustment-factor residuals.
 
 For each decision date, the replay engine:
 
@@ -81,7 +99,16 @@ For each decision date, the replay engine:
 4. evaluates baseline and proposed portfolio paths
 5. auto-computes marginal portfolio contribution
 6. injects those marginal metrics into the promotion snapshot
-7. evaluates the portfolio promotion gate
+7. checks any bound `corporate_action_exception_ledger` windows against the
+   replay decision intervals
+8. evaluates the portfolio promotion gate
+
+When a replay case binds `market_data_source_db_path`, the loader reads
+`corporate_action_exception_ledger` and the replay reports any baseline or
+candidate security/date interval that intersects those windows. Any such
+exposure appends `corporate_action_exception_exposure` to the failed promotion
+checks. This deliberately quarantines unexplained adjustment-factor residuals
+instead of converting them into invented broker cash/share bookings.
 
 ## What Gets Auto-Populated
 
@@ -98,7 +125,19 @@ Other promotion inputs can still come from adjacent research lanes for now, incl
 - correlation diagnostics
 - stressed cost scenarios
 
-Those remain valid external inputs until the corresponding research modules are formalized inside V2.
+Cost-scenario and regime pass flags supplied directly in replay cases are
+marked as `manual_input` evidence until corresponding derived evidence modules
+exist inside V2.
+
+If a replay case binds a regime overlay, the default application mode is
+`both_portfolios`: baseline and candidate paths are both scaled by the same
+overlay decisions before marginal value is measured. `candidate_only` remains
+available for research experiments, but it fails promotion/live-ready gates
+because it changes the comparison basis.
+
+Live-ready promotion additionally requires a daily portfolio backtest with
+benchmark-relative active metrics such as `information_ratio`. Research replay
+IR alone is not sufficient release evidence.
 
 ## Finance Logic Behind The Strict Calendar
 

@@ -59,9 +59,14 @@ class PortfolioResearchEvaluatorTest(unittest.TestCase):
 
         self.assertAlmostEqual(snapshot.oos_ir, summary.ir)
         self.assertAlmostEqual(snapshot.oos_tstat, summary.tstat)
+        self.assertAlmostEqual(snapshot.research_ir, summary.ir)
+        self.assertAlmostEqual(snapshot.research_tstat, summary.tstat)
+        self.assertEqual(snapshot.metric_basis, "artifact_period_absolute_net_return")
         self.assertAlmostEqual(snapshot.realized_turnover_vs_budget, 1.0888888888888888)
         self.assertAlmostEqual(snapshot.limit_locked_name_share, summary.blocked_name_share)
         self.assertEqual(snapshot.cost_scenario_pass["high"], False)
+        self.assertEqual(snapshot.cost_scenario_evidence_basis["base"], "manual_input")
+        self.assertEqual(snapshot.regime_evidence_basis["bull"], "manual_input")
 
     def test_marginal_contribution_uses_baseline_and_candidate_paths(self) -> None:
         baseline = PortfolioSimulationResult(

@@ -14,6 +14,7 @@ from .research_artifact_loader import (
     SleeveResearchObservationRecord,
     SleeveResearchObservationStep,
 )
+from .scoring import group_neutral_zscore_map, rank_then_cap_weights, zscore_map
 from .target_builder import TradeLegState
 
 
@@ -112,6 +113,8 @@ class LoadedTrendResearchInputBuildCase:
     source_db_path: Path
     output_path: str
     holding_count: int
+    construction_selection: str
+    weight_cap: float
     holding_horizon_days: int
     min_turnover_cny_mn: float
     descriptor_weights: dict[str, float]
@@ -148,6 +151,10 @@ class _CandidateRow:
     ret_short: float
     ret_long: float
     short_return_vol: float | None
+    gross_holding_return: float | None = None
+    quarantine_start_trade_date: str = ""
+    entry_trade_date: str = ""
+    exit_trade_date: str = ""
 
 
 @dataclass(slots=True)
@@ -158,6 +165,23 @@ class _TradeLegSnapshot:
     pre_close: float | None
     previous_close_adj: float | None
     is_st: bool | None
+    adj_factor: float | None = None
+    price_basis: str = "unadjusted"
+
+
+@dataclass(slots=True)
+class _CorporateActionExceptionWindow:
+    exception_id: str
+    asset_id: str
+    previous_trade_date: str
+    trade_date: str
+
+
+@dataclass(slots=True)
+class _MarketDataFallbackWindow:
+    asset_id: str
+    trade_date: str
+    reason: str
 
 
 def load_trend_research_input_build_case(
@@ -225,6 +249,8 @@ def load_trend_research_input_build_case(
     default_cost_model = load_cost_model(CONFIG_ROOT / "cost_models" / f"{target.cost_model}.toml")
 
     holding_count = int(sleeve.construction.get("holding_count", 0))
+    construction_selection = str(sleeve.construction.get("selection", "equal_weight"))
+    weight_cap = float(sleeve.construction.get("weight_cap", 0.0))
     min_turnover_cny_mn = max(
         float(sleeve.constraints.get("min_median_daily_turnover_cny_mn", 0.0)),
         default_cost_model.min_median_daily_turnover_cny_mn,
@@ -240,6 +266,8 @@ def load_trend_research_input_build_case(
         source_db_path=_resolve_project_path(definition.source_db_path),
         output_path=definition.output_path,
         holding_count=holding_count,
+        construction_selection=construction_selection,
+        weight_cap=weight_cap,
         holding_horizon_days=target.horizon_days,
         min_turnover_cny_mn=min_turnover_cny_mn,
         descriptor_weights=descriptor_weights,
@@ -284,6 +312,31 @@ def build_trend_research_observation_input(
         limit_lock_mode=loaded_case.definition.limit_lock_mode,
         exclude_boards=set(loaded_case.definition.exclude_boards),
     )
+    exception_windows = _load_corporate_action_exception_windows(
+        loaded_case.source_db_path
+    )
+    candidates, corporate_action_exception_excluded_count = (
+        _filter_corporate_action_exception_candidates(
+            candidates=candidates,
+            exception_windows=exception_windows,
+        )
+    )
+    fallback_windows = _load_market_data_fallback_windows(loaded_case.source_db_path)
+    candidates, market_data_fallback_excluded_counts = (
+        _filter_market_data_fallback_candidates(
+            candidates=candidates,
+            fallback_windows=fallback_windows,
+        )
+    )
+    industry_by_observation = _load_industry_labels(
+        source_db_path=loaded_case.source_db_path,
+        industry_label_source=loaded_case.definition.industry_label_source,
+        industry_schema=loaded_case.definition.industry_schema,
+        requested_observations=[
+            (candidate.trade_date, candidate.security_id)
+            for candidate in candidates
+        ],
+    )
 
     steps: list[SleeveResearchObservationStep] = []
     selected_by_date: list[tuple[str, list[dict[str, object]]]] = []
@@ -295,6 +348,13 @@ def build_trend_research_observation_input(
         scored = _score_candidates(
             candidates=date_candidates,
             descriptor_weights=loaded_case.descriptor_weights,
+            industry_by_asset={
+                candidate.security_id: industry_by_observation.get(
+                    (trade_date, candidate.security_id),
+                    "",
+                )
+                for candidate in date_candidates
+            },
         )
         selected_count = loaded_case.holding_count or len(scored)
         selected = scored[:selected_count]
@@ -324,27 +384,21 @@ def build_trend_research_observation_input(
             required_components=loaded_case.residual_components,
         )
 
-    industry_by_observation = _load_industry_labels(
-        source_db_path=loaded_case.source_db_path,
-        industry_label_source=loaded_case.definition.industry_label_source,
-        industry_schema=loaded_case.definition.industry_schema,
-        requested_observations=[
-            (trade_date, str(item["candidate"].security_id))
-            for trade_date, selected in selected_by_date
-            for item in selected
-        ],
-    )
-
     for trade_date, selected in selected_by_date:
-        target_weight = 1.0 / len(selected)
+        target_weights = _target_weights_for_selected(
+            selected=selected,
+            selection=loaded_case.construction_selection,
+            weight_cap=loaded_case.weight_cap,
+        )
         records = [
             SleeveResearchObservationRecord(
                 asset_id=item["candidate"].security_id,
                 rank=rank,
                 score=item["score"],
-                target_weight=target_weight,
+                target_weight=target_weights[item["candidate"].security_id],
                 entry_open=item["candidate"].entry_open,
                 exit_open=item["candidate"].exit_open,
+                gross_holding_return=item["candidate"].gross_holding_return,
                 industry=industry_by_observation.get(
                     (trade_date, item["candidate"].security_id),
                     "",
@@ -378,6 +432,12 @@ def build_trend_research_observation_input(
         warnings=_build_warnings(
             loaded_case.definition.industry_label_source,
             loaded_case.definition.limit_lock_mode,
+            corporate_action_exception_excluded_count=(
+                corporate_action_exception_excluded_count
+            ),
+            market_data_fallback_excluded_counts=(
+                market_data_fallback_excluded_counts
+            ),
         ),
     )
 
@@ -527,6 +587,29 @@ def _load_table_columns(source_db_path: Path, table_name: str) -> set[str]:
     return {str(row[1]) for row in rows}
 
 
+def _table_columns(conn: object, table_name: str) -> set[str]:
+    rows = conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
+    return {str(row[1]) for row in rows}
+
+
+def _pit_adjusted_close_sql(alias: str, columns: set[str]) -> str:
+    if {"close", "adj_factor"}.issubset(columns):
+        close_fallback = f"{alias}.close_adj" if "close_adj" in columns else f"{alias}.close"
+        price_basis_is_raw = (
+            f"COALESCE({alias}.price_basis, 'unadjusted') = 'unadjusted'"
+            if "price_basis" in columns
+            else "TRUE"
+        )
+        return (
+            f"CASE WHEN {alias}.close IS NOT NULL AND {alias}.adj_factor IS NOT NULL "
+            f"AND {alias}.adj_factor > 0.0 AND {price_basis_is_raw} "
+            f"THEN {alias}.close * {alias}.adj_factor ELSE {close_fallback} END"
+        )
+    if "close_adj" in columns:
+        return f"{alias}.close_adj"
+    return f"{alias}.close"
+
+
 def _timestamp_sql(expression: str) -> str:
     return f"""
         CASE
@@ -538,13 +621,244 @@ def _timestamp_sql(expression: str) -> str:
     """
 
 
-def _build_warnings(industry_label_source: str, limit_lock_mode: str) -> list[str]:
-    warnings = ["industry_relative_branch_blocked"]
+def _build_warnings(
+    industry_label_source: str,
+    limit_lock_mode: str,
+    *,
+    corporate_action_exception_excluded_count: int = 0,
+    market_data_fallback_excluded_counts: dict[str, int] | None = None,
+) -> list[str]:
+    warnings: list[str] = []
     if industry_label_source == "omit":
+        warnings.append("industry_relative_branch_blocked")
         warnings.append("industry_labels_omitted")
     if limit_lock_mode == "disabled":
         warnings.append("limit_lock_detection_disabled")
+    if corporate_action_exception_excluded_count > 0:
+        warnings.append(
+            "corporate_action_exception_quarantine_excluded_count="
+            f"{corporate_action_exception_excluded_count}"
+        )
+    fallback_counts = market_data_fallback_excluded_counts or {}
+    qfq_count = int(fallback_counts.get("qfq_fallback_price_basis", 0))
+    tradeability_count = int(fallback_counts.get("tradeability_ohlc_fallback", 0))
+    if qfq_count > 0:
+        warnings.append(f"qfq_fallback_quarantine_excluded_count={qfq_count}")
+    if tradeability_count > 0:
+        warnings.append(
+            "tradeability_fallback_quarantine_excluded_count="
+            f"{tradeability_count}"
+        )
     return warnings
+
+
+def _load_corporate_action_exception_windows(
+    source_db_path: Path,
+) -> list[_CorporateActionExceptionWindow]:
+    import duckdb
+
+    conn = duckdb.connect(str(source_db_path), read_only=True)
+    try:
+        if not _duckdb_table_exists(conn, "corporate_action_exception_ledger"):
+            return []
+        columns = _table_columns(conn, "corporate_action_exception_ledger")
+        required_columns = {
+            "exception_id",
+            "security_id",
+            "previous_trade_date",
+            "trade_date",
+        }
+        if not required_columns.issubset(columns):
+            return []
+        rows = conn.execute(
+            """
+            SELECT
+                exception_id,
+                security_id,
+                previous_trade_date,
+                trade_date
+            FROM corporate_action_exception_ledger
+            ORDER BY trade_date, security_id, exception_id
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return [
+        _CorporateActionExceptionWindow(
+            exception_id=str(exception_id),
+            asset_id=str(security_id),
+            previous_trade_date=str(previous_trade_date),
+            trade_date=str(trade_date),
+        )
+        for exception_id, security_id, previous_trade_date, trade_date in rows
+    ]
+
+
+def _filter_corporate_action_exception_candidates(
+    *,
+    candidates: list,
+    exception_windows: list[_CorporateActionExceptionWindow],
+) -> tuple[list, int]:
+    if not exception_windows:
+        return candidates, 0
+
+    windows_by_asset: dict[str, list[_CorporateActionExceptionWindow]] = {}
+    for window in exception_windows:
+        windows_by_asset.setdefault(window.asset_id, []).append(window)
+
+    kept = []
+    excluded_count = 0
+    for candidate in candidates:
+        interval_start = _date_key(
+            getattr(candidate, "quarantine_start_trade_date", "")
+            or candidate.trade_date
+        )
+        interval_end = _date_key(
+            getattr(candidate, "exit_trade_date", "") or candidate.trade_date
+        )
+        if not interval_start or not interval_end:
+            kept.append(candidate)
+            continue
+        windows = windows_by_asset.get(candidate.security_id, [])
+        if any(
+            _exception_window_intersects_interval(
+                exception=window,
+                interval_start_key=interval_start,
+                interval_end_key=interval_end,
+            )
+            for window in windows
+        ):
+            excluded_count += 1
+            continue
+        kept.append(candidate)
+    return kept, excluded_count
+
+
+def _load_market_data_fallback_windows(
+    source_db_path: Path,
+) -> list[_MarketDataFallbackWindow]:
+    import duckdb
+
+    conn = duckdb.connect(str(source_db_path), read_only=True)
+    rows: list[tuple[object, object, object]] = []
+    try:
+        if _duckdb_table_exists(conn, "daily_bar_pit"):
+            daily_columns = _table_columns(conn, "daily_bar_pit")
+            if {"security_id", "trade_date", "price_basis"}.issubset(daily_columns):
+                rows.extend(
+                    conn.execute(
+                        """
+                        SELECT
+                            security_id,
+                            trade_date,
+                            'qfq_fallback_price_basis' AS reason
+                        FROM daily_bar_pit
+                        WHERE COALESCE(price_basis, 'unadjusted') <> 'unadjusted'
+                        """
+                    ).fetchall()
+                )
+        if _duckdb_table_exists(conn, "tradeability_state_daily"):
+            tradeability_columns = _table_columns(conn, "tradeability_state_daily")
+            if {
+                "security_id",
+                "trade_date",
+                "source_priority",
+            }.issubset(tradeability_columns):
+                rows.extend(
+                    conn.execute(
+                        """
+                        SELECT
+                            security_id,
+                            trade_date,
+                            'tradeability_ohlc_fallback' AS reason
+                        FROM tradeability_state_daily
+                        WHERE source_priority = 'ohlc_fallback'
+                        """
+                    ).fetchall()
+                )
+    finally:
+        conn.close()
+
+    return [
+        _MarketDataFallbackWindow(
+            asset_id=str(security_id),
+            trade_date=str(trade_date),
+            reason=str(reason),
+        )
+        for security_id, trade_date, reason in rows
+    ]
+
+
+def _filter_market_data_fallback_candidates(
+    *,
+    candidates: list,
+    fallback_windows: list[_MarketDataFallbackWindow],
+) -> tuple[list, dict[str, int]]:
+    if not fallback_windows:
+        return candidates, {}
+
+    windows_by_asset: dict[str, list[_MarketDataFallbackWindow]] = {}
+    for window in fallback_windows:
+        windows_by_asset.setdefault(window.asset_id, []).append(window)
+
+    kept = []
+    excluded_counts: dict[str, int] = {}
+    for candidate in candidates:
+        interval_start = _date_key(
+            getattr(candidate, "quarantine_start_trade_date", "")
+            or candidate.trade_date
+        )
+        interval_end = _date_key(
+            getattr(candidate, "exit_trade_date", "") or candidate.trade_date
+        )
+        windows = windows_by_asset.get(candidate.security_id, [])
+        matched_reason = ""
+        for window in windows:
+            window_date = _date_key(window.trade_date)
+            if interval_start <= window_date <= interval_end:
+                matched_reason = window.reason
+                break
+        if matched_reason:
+            excluded_counts[matched_reason] = (
+                excluded_counts.get(matched_reason, 0) + 1
+            )
+            continue
+        kept.append(candidate)
+    return kept, excluded_counts
+
+
+def _exception_window_intersects_interval(
+    *,
+    exception: _CorporateActionExceptionWindow,
+    interval_start_key: str,
+    interval_end_key: str,
+) -> bool:
+    exception_start_key = _date_key(exception.previous_trade_date)
+    exception_end_key = _date_key(exception.trade_date)
+    if not exception_start_key or not exception_end_key:
+        return False
+    return exception_start_key <= interval_end_key and exception_end_key >= interval_start_key
+
+
+def _date_key(value: str) -> str:
+    text = str(value).strip()
+    if len(text) == 8 and text.isdigit():
+        return text
+    return text.replace("-", "")
+
+
+def _duckdb_table_exists(conn: object, table_name: str) -> bool:
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM duckdb_tables()
+        WHERE table_name = ?
+        LIMIT 1
+        """,
+        [table_name],
+    ).fetchone()
+    return row is not None
 
 
 def _calendar_bounds(
@@ -603,8 +917,10 @@ def _load_candidate_rows(
     calendar_index = {trade_date: index for index, trade_date in enumerate(calendar)}
     conn = duckdb.connect(str(source_db_path), read_only=True)
     try:
+        daily_bar_columns = _table_columns(conn, "daily_bar_pit")
+        adjusted_close_sql = _pit_adjusted_close_sql("d", daily_bar_columns)
         rows = conn.execute(
-            """
+            f"""
             WITH history AS (
                 SELECT
                     d.security_id,
@@ -612,11 +928,11 @@ def _load_candidate_rows(
                     s.list_date,
                     d.is_st,
                     d.board,
-                    d.close_adj,
+                    {adjusted_close_sql} AS adjusted_close,
                     d.turnover_value_cny,
-                    lag(d.close_adj, 1) OVER w AS prev_close_adj,
-                    lag(d.close_adj, ?) OVER w AS short_close_lag,
-                    lag(d.close_adj, ?) OVER w AS long_close_lag,
+                    lag({adjusted_close_sql}, 1) OVER w AS prev_adjusted_close,
+                    lag({adjusted_close_sql}, ?) OVER w AS short_close_lag,
+                    lag({adjusted_close_sql}, ?) OVER w AS long_close_lag,
                     quantile_cont(d.turnover_value_cny, 0.5) OVER (
                         PARTITION BY d.security_id
                         ORDER BY d.trade_date
@@ -638,7 +954,7 @@ def _load_candidate_rows(
                 SELECT
                     *,
                     CASE
-                        WHEN prev_close_adj > 0 THEN (close_adj / prev_close_adj) - 1.0
+                        WHEN prev_adjusted_close > 0 THEN (adjusted_close / prev_adjusted_close) - 1.0
                         ELSE NULL
                     END AS daily_return
                 FROM history
@@ -647,11 +963,11 @@ def _load_candidate_rows(
                 SELECT
                     *,
                     CASE
-                        WHEN short_close_lag > 0 THEN (close_adj / short_close_lag) - 1.0
+                        WHEN short_close_lag > 0 THEN (adjusted_close / short_close_lag) - 1.0
                         ELSE NULL
                     END AS ret_short,
                     CASE
-                        WHEN long_close_lag > 0 THEN (close_adj / long_close_lag) - 1.0
+                        WHEN long_close_lag > 0 THEN (adjusted_close / long_close_lag) - 1.0
                         ELSE NULL
                     END AS ret_long,
                     stddev_samp(daily_return) OVER (
@@ -728,6 +1044,7 @@ def _load_candidate_rows(
         signal_index = calendar_index.get(trade_date)
         if signal_index is None or signal_index + horizon_days >= len(calendar):
             continue
+        quarantine_start_trade_date = calendar[max(0, signal_index - lookback_days)]
         entry_trade_date = calendar[signal_index + 1]
         exit_trade_date = calendar[signal_index + horizon_days]
 
@@ -753,6 +1070,7 @@ def _load_candidate_rows(
                 "short_return_vol": (
                     None if short_return_vol is None else float(short_return_vol)
                 ),
+                "quarantine_start_trade_date": quarantine_start_trade_date,
                 "entry_trade_date": entry_trade_date,
                 "exit_trade_date": exit_trade_date,
             }
@@ -832,6 +1150,17 @@ def _load_candidate_rows(
                     if candidate_input["short_return_vol"] is None
                     else float(candidate_input["short_return_vol"])
                 ),
+                gross_holding_return=_trade_leg_holding_return(
+                    entry_snapshot=entry_snapshot,
+                    exit_snapshot=exit_snapshot,
+                    entry_open=entry_effective_open,
+                    exit_open=exit_effective_open,
+                ),
+                quarantine_start_trade_date=str(
+                    candidate_input["quarantine_start_trade_date"]
+                ),
+                entry_trade_date=entry_trade_date,
+                exit_trade_date=exit_trade_date,
             )
         )
     return candidates
@@ -853,6 +1182,13 @@ def _load_trade_leg_snapshots(
 
     conn = duckdb.connect(str(source_db_path), read_only=True)
     try:
+        daily_bar_columns = _table_columns(conn, "daily_bar_pit")
+        adj_factor_sql = "d.adj_factor" if "adj_factor" in daily_bar_columns else "NULL"
+        price_basis_sql = (
+            "d.price_basis"
+            if "price_basis" in daily_bar_columns
+            else "'unadjusted'"
+        )
         rows = conn.execute(
             f"""
             WITH requested(security_id, trade_date) AS (
@@ -865,16 +1201,18 @@ def _load_trade_leg_snapshots(
                 d.high,
                 d.low,
                 d.pre_close,
+                {adj_factor_sql} AS adj_factor,
+                {price_basis_sql} AS price_basis,
                 (
-                    SELECT prev.close_adj
+                    SELECT prev.close
                     FROM daily_bar_pit AS prev
                     WHERE prev.security_id = requested.security_id
                       AND prev.trade_date < requested.trade_date
-                      AND prev.close_adj IS NOT NULL
-                      AND prev.close_adj > 0.0
+                      AND prev.close IS NOT NULL
+                      AND prev.close > 0.0
                     ORDER BY prev.trade_date DESC
                     LIMIT 1
-                ) AS previous_close_adj,
+                ) AS previous_close,
                 d.is_st
             FROM requested
             LEFT JOIN daily_bar_pit AS d
@@ -896,6 +1234,8 @@ def _load_trade_leg_snapshots(
                 None if previous_close_adj is None else float(previous_close_adj)
             ),
             is_st=None if is_st is None else bool(is_st),
+            adj_factor=None if adj_factor is None else float(adj_factor),
+            price_basis=str(price_basis or "unadjusted"),
         )
         for (
             security_id,
@@ -904,6 +1244,8 @@ def _load_trade_leg_snapshots(
             high_price,
             low_price,
             pre_close,
+            adj_factor,
+            price_basis,
             previous_close_adj,
             is_st,
         ) in rows
@@ -916,6 +1258,29 @@ def _trade_leg_fallback_price(snapshot: _TradeLegSnapshot) -> float | None:
     if snapshot.previous_close_adj is not None and snapshot.previous_close_adj > 0.0:
         return snapshot.previous_close_adj
     return None
+
+
+def _trade_leg_holding_return(
+    *,
+    entry_snapshot: _TradeLegSnapshot,
+    exit_snapshot: _TradeLegSnapshot,
+    entry_open: float,
+    exit_open: float,
+) -> float | None:
+    if (
+        entry_snapshot.adj_factor is None
+        or exit_snapshot.adj_factor is None
+        or entry_snapshot.adj_factor <= 0.0
+        or exit_snapshot.adj_factor <= 0.0
+        or entry_snapshot.price_basis != "unadjusted"
+        or exit_snapshot.price_basis != "unadjusted"
+        or entry_open <= 0.0
+    ):
+        return None
+    return (
+        (exit_open * exit_snapshot.adj_factor)
+        / (entry_open * entry_snapshot.adj_factor)
+    ) - 1.0
 
 
 def _resolve_trade_leg_open(
@@ -981,6 +1346,7 @@ def _score_candidates(
     *,
     candidates: list[_CandidateRow],
     descriptor_weights: dict[str, float],
+    industry_by_asset: dict[str, str] | None = None,
 ) -> list[dict[str, object]]:
     raw_metrics = {
         candidate.security_id: {
@@ -995,15 +1361,19 @@ def _score_candidates(
         for candidate in candidates
     }
 
-    zscores_by_descriptor = {
-        descriptor_id: _zscore_map(
-            {
-                candidate.security_id: float(raw_metrics[candidate.security_id][descriptor_id])
-                for candidate in candidates
-            }
-        )
-        for descriptor_id in descriptor_weights
-    }
+    zscores_by_descriptor = {}
+    for descriptor_id in descriptor_weights:
+        values_by_asset = {
+            candidate.security_id: float(raw_metrics[candidate.security_id][descriptor_id])
+            for candidate in candidates
+        }
+        if industry_by_asset and all(industry_by_asset.values()):
+            zscores_by_descriptor[descriptor_id] = group_neutral_zscore_map(
+                values_by_asset=values_by_asset,
+                group_by_asset=industry_by_asset,
+            )
+            continue
+        zscores_by_descriptor[descriptor_id] = zscore_map(values_by_asset)
 
     scored = []
     for candidate in candidates:
@@ -1051,16 +1421,23 @@ def _descriptor_weights(descriptor_set) -> dict[str, float]:
 
 
 def _zscore_map(values: dict[str, float]) -> dict[str, float]:
-    series = list(values.values())
-    if len(series) < 2:
-        return {key: 0.0 for key in values}
+    return zscore_map(values)
 
-    mean = sum(series) / len(series)
-    variance = sum((value - mean) ** 2 for value in series) / (len(series) - 1)
-    if variance <= 0.0:
-        return {key: 0.0 for key in values}
-    stdev = math.sqrt(variance)
-    return {key: (value - mean) / stdev for key, value in values.items()}
+
+def _target_weights_for_selected(
+    *,
+    selected: list[dict[str, object]],
+    selection: str,
+    weight_cap: float,
+) -> dict[str, float]:
+    asset_ids = [
+        str(item["candidate"].security_id)
+        for item in selected
+    ]
+    if selection == "rank_then_cap_weight":
+        return rank_then_cap_weights(asset_ids, weight_cap=weight_cap)
+    target_weight = 1.0 / len(asset_ids)
+    return {asset_id: target_weight for asset_id in asset_ids}
 
 
 def _listing_age_days(list_date: str, trade_date: str) -> int:

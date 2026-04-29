@@ -11,12 +11,17 @@ from .research_artifact_loader import (
     SleeveResearchObservationRecord,
     SleeveResearchObservationStep,
 )
+from .scoring import group_neutral_zscore_map, rank_then_cap_weights, zscore_map
 from .target_builder import TradeLegState
 from .trend_research_input_builder import (
     SUPPORTED_LIMIT_LOCK_MODES,
     _calendar_bounds,
+    _filter_corporate_action_exception_candidates,
+    _filter_market_data_fallback_candidates,
     _is_cn_a_directional_open_lock,
+    _load_corporate_action_exception_windows,
     _load_industry_labels,
+    _load_market_data_fallback_windows,
     _load_trade_calendar,
     _load_trade_leg_snapshots,
     _read_toml,
@@ -104,6 +109,8 @@ class LoadedFundamentalResearchInputBuildCase:
     source_db_path: Path
     output_path: str
     holding_count: int
+    construction_selection: str
+    weight_cap: float
     holding_horizon_days: int
     min_turnover_cny_mn: float
     descriptor_weights: dict[str, float]
@@ -157,6 +164,9 @@ class _FundamentalCandidateRow:
     debt_to_assets: float
     netprofit_yoy: float
     dt_netprofit_yoy: float
+    quarantine_start_trade_date: str = ""
+    entry_trade_date: str = ""
+    exit_trade_date: str = ""
 
 
 def load_fundamental_research_input_build_case(
@@ -204,6 +214,8 @@ def load_fundamental_research_input_build_case(
         CONFIG_ROOT / "cost_models" / f"{target.cost_model}.toml"
     )
     holding_count = int(sleeve.construction.get("holding_count", 0))
+    construction_selection = str(sleeve.construction.get("selection", "equal_weight"))
+    weight_cap = float(sleeve.construction.get("weight_cap", 0.0))
     min_turnover_cny_mn = max(
         float(sleeve.constraints.get("min_median_daily_turnover_cny_mn", 0.0)),
         default_cost_model.min_median_daily_turnover_cny_mn,
@@ -218,6 +230,8 @@ def load_fundamental_research_input_build_case(
         source_db_path=_resolve_project_path(definition.source_db_path),
         output_path=definition.output_path,
         holding_count=holding_count,
+        construction_selection=construction_selection,
+        weight_cap=weight_cap,
         holding_horizon_days=target.horizon_days,
         min_turnover_cny_mn=min_turnover_cny_mn,
         descriptor_weights=_descriptor_weights(descriptor_set),
@@ -256,6 +270,22 @@ def build_fundamental_research_observation_input(
         rebalance_dates=set(rebalance_dates),
         limit_lock_mode=loaded_case.definition.limit_lock_mode,
         industry_schema=loaded_case.definition.industry_schema,
+    )
+    exception_windows = _load_corporate_action_exception_windows(
+        loaded_case.source_db_path
+    )
+    candidates, corporate_action_exception_excluded_count = (
+        _filter_corporate_action_exception_candidates(
+            candidates=candidates,
+            exception_windows=exception_windows,
+        )
+    )
+    fallback_windows = _load_market_data_fallback_windows(loaded_case.source_db_path)
+    candidates, market_data_fallback_excluded_counts = (
+        _filter_market_data_fallback_candidates(
+            candidates=candidates,
+            fallback_windows=fallback_windows,
+        )
     )
 
     if not candidates:
@@ -299,13 +329,17 @@ def build_fundamental_research_observation_input(
 
     steps: list[SleeveResearchObservationStep] = []
     for trade_date, selected in selected_by_date:
-        target_weight = 1.0 / len(selected)
+        target_weights = _target_weights_for_selected(
+            selected=selected,
+            selection=loaded_case.construction_selection,
+            weight_cap=loaded_case.weight_cap,
+        )
         records = [
             SleeveResearchObservationRecord(
                 asset_id=item["candidate"].security_id,
                 rank=rank,
                 score=item["score"],
-                target_weight=target_weight,
+                target_weight=target_weights[item["candidate"].security_id],
                 entry_open=item["candidate"].entry_open,
                 exit_open=item["candidate"].exit_open,
                 industry=item["candidate"].industry,
@@ -335,7 +369,15 @@ def build_fundamental_research_observation_input(
         descriptor_set_id=loaded_case.descriptor_set_id,
         source_db_path=str(loaded_case.source_db_path),
         observation_input=SleeveResearchObservationInput(steps=steps),
-        warnings=_build_warnings(loaded_case.definition.limit_lock_mode),
+        warnings=_build_warnings(
+            loaded_case.definition.limit_lock_mode,
+            corporate_action_exception_excluded_count=(
+                corporate_action_exception_excluded_count
+            ),
+            market_data_fallback_excluded_counts=(
+                market_data_fallback_excluded_counts
+            ),
+        ),
     )
 
 
@@ -537,6 +579,7 @@ def _load_candidate_rows(
                 "debt_to_assets": float(debt_to_assets),
                 "netprofit_yoy": float(netprofit_yoy),
                 "dt_netprofit_yoy": float(dt_netprofit_yoy),
+                "quarantine_start_trade_date": trade_date,
                 "entry_trade_date": entry_trade_date,
                 "exit_trade_date": exit_trade_date,
             }
@@ -614,6 +657,11 @@ def _load_candidate_rows(
                 debt_to_assets=float(candidate_input["debt_to_assets"]),
                 netprofit_yoy=float(candidate_input["netprofit_yoy"]),
                 dt_netprofit_yoy=float(candidate_input["dt_netprofit_yoy"]),
+                quarantine_start_trade_date=str(
+                    candidate_input["quarantine_start_trade_date"]
+                ),
+                entry_trade_date=entry_trade_date,
+                exit_trade_date=exit_trade_date,
             )
         )
     return candidates
@@ -669,16 +717,13 @@ def _industry_neutral_zscore_map(
     candidates: list[_FundamentalCandidateRow],
     values_by_security: dict[str, float],
 ) -> dict[str, float]:
-    grouped: dict[str, dict[str, float]] = {}
-    for candidate in candidates:
-        grouped.setdefault(candidate.industry, {})[candidate.security_id] = values_by_security[
-            candidate.security_id
-        ]
-
-    zscores: dict[str, float] = {}
-    for group in grouped.values():
-        zscores.update(_zscore_map(group))
-    return zscores
+    return group_neutral_zscore_map(
+        values_by_asset=values_by_security,
+        group_by_asset={
+            candidate.security_id: candidate.industry
+            for candidate in candidates
+        },
+    )
 
 
 def _descriptor_weights(descriptor_set) -> dict[str, float]:
@@ -945,24 +990,51 @@ def _load_required_residual_snapshot_coverage(
     return required_observations
 
 
-def _build_warnings(limit_lock_mode: str) -> list[str]:
+def _build_warnings(
+    limit_lock_mode: str,
+    *,
+    corporate_action_exception_excluded_count: int = 0,
+    market_data_fallback_excluded_counts: dict[str, int] | None = None,
+) -> list[str]:
     warnings = ["fundamental_snapshot_pit_amber_anchor_only"]
     if limit_lock_mode == "disabled":
         warnings.append("limit_lock_detection_disabled")
+    if corporate_action_exception_excluded_count > 0:
+        warnings.append(
+            "corporate_action_exception_quarantine_excluded_count="
+            f"{corporate_action_exception_excluded_count}"
+        )
+    fallback_counts = market_data_fallback_excluded_counts or {}
+    qfq_count = int(fallback_counts.get("qfq_fallback_price_basis", 0))
+    tradeability_count = int(fallback_counts.get("tradeability_ohlc_fallback", 0))
+    if qfq_count > 0:
+        warnings.append(f"qfq_fallback_quarantine_excluded_count={qfq_count}")
+    if tradeability_count > 0:
+        warnings.append(
+            "tradeability_fallback_quarantine_excluded_count="
+            f"{tradeability_count}"
+        )
     return warnings
 
 
 def _zscore_map(values: dict[str, float]) -> dict[str, float]:
-    series = list(values.values())
-    if len(series) < 2:
-        return {key: 0.0 for key in values}
+    return zscore_map(values)
 
-    mean = sum(series) / len(series)
-    variance = sum((value - mean) ** 2 for value in series) / (len(series) - 1)
-    if variance <= 0.0:
-        return {key: 0.0 for key in values}
-    stdev = math.sqrt(variance)
-    return {key: (value - mean) / stdev for key, value in values.items()}
+
+def _target_weights_for_selected(
+    *,
+    selected: list[dict[str, object]],
+    selection: str,
+    weight_cap: float,
+) -> dict[str, float]:
+    asset_ids = [
+        str(item["candidate"].security_id)
+        for item in selected
+    ]
+    if selection == "rank_then_cap_weight":
+        return rank_then_cap_weights(asset_ids, weight_cap=weight_cap)
+    target_weight = 1.0 / len(asset_ids)
+    return {asset_id: target_weight for asset_id in asset_ids}
 
 
 def _listing_age_days(list_date: str, trade_date: str) -> int:

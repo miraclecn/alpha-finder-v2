@@ -12,6 +12,61 @@ from alpha_find_v2.research_artifact_loader import (
 
 
 class SleeveArtifactBuilderTest(unittest.TestCase):
+    def test_build_case_uses_supplied_holding_return_for_corporate_action_labels(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            input_path = temp_root / "research_input.json"
+            output_path = temp_root / "artifact.json"
+            case_path = temp_root / "build_case.toml"
+
+            input_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "artifact_type": "sleeve_research_observation_input",
+                        "steps": [
+                            {
+                                "trade_date": "2026-04-06",
+                                "records": [
+                                    {
+                                        "asset_id": "AAA",
+                                        "rank": 1,
+                                        "score": 9.0,
+                                        "target_weight": 1.0,
+                                        "entry_open": 10.0,
+                                        "exit_open": 6.0,
+                                        "gross_holding_return": 0.20,
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            case_path.write_text(
+                "\n".join(
+                    [
+                        'schema_version = 1',
+                        'artifact_type = "sleeve_artifact_build_case"',
+                        'case_id = "trend_leadership_build_case"',
+                        'description = "Build with broker-like holding return."',
+                        'sleeve_path = "config/sleeves/trend_leadership_core.toml"',
+                        f'input_path = "{input_path}"',
+                        f'output_path = "{output_path}"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            loaded_case = load_sleeve_artifact_build_case(case_path)
+            artifact = build_sleeve_artifact(loaded_case)
+            write_sleeve_artifact(artifact, loaded_case.definition.output_path)
+            roundtrip = load_sleeve_artifact(output_path)
+
+            self.assertAlmostEqual(roundtrip.steps[0].records[0].realized_return, 0.1976)
+
     def test_build_case_emits_artifact_with_residual_return_and_trade_constraints(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)

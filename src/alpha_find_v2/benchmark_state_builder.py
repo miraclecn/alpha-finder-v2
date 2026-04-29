@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from datetime import datetime
 import json
 from pathlib import Path
 import tomllib
@@ -68,6 +69,7 @@ class _BenchmarkMemberRow:
     security_id: str
     weight_value: float | None
     industry_code: str = ""
+    snapshot_date: str = ""
 
 
 def load_benchmark_state_build_case(path: Path | str) -> LoadedBenchmarkStateBuildCase:
@@ -224,6 +226,20 @@ def _build_step(
             raise ValueError(f"Benchmark state requires positive provider weight sum on {trade_date}")
         raise ValueError(f"Benchmark state requires positive total float market cap on {trade_date}")
 
+    snapshot_dates = {
+        row.snapshot_date
+        for row in rows
+        if row.snapshot_date
+    }
+    if len(snapshot_dates) > 1:
+        raise ValueError(f"Benchmark state has mixed provider snapshot dates on {trade_date}")
+    provider_snapshot_date = next(iter(snapshot_dates), "") if weighting_method == "provider_weight" else ""
+    snapshot_age_days = (
+        _date_diff_days(provider_snapshot_date, trade_date)
+        if provider_snapshot_date
+        else 0
+    )
+
     constituents: list[BenchmarkConstituent] = []
     for security_id, raw_weight, industry_code in raw_weights:
         weight = raw_weight / total_raw_weight
@@ -245,6 +261,8 @@ def _build_step(
         trade_date=trade_date,
         effective_at=_trade_timestamp(trade_date, effective_time),
         available_at=_trade_timestamp(trade_date, available_time),
+        provider_snapshot_date=provider_snapshot_date,
+        snapshot_age_days=snapshot_age_days,
         industry_weights=industry_weights,
         constituents=constituents,
     )
@@ -361,6 +379,7 @@ def _load_member_rows(
             security_id=str(security_id),
             weight_value=float(float_mcap_cny) if float_mcap_cny is not None else None,
             industry_code=str(industry_code or ""),
+            snapshot_date="",
         )
         for trade_date, security_id, float_mcap_cny, industry_code in rows
     ]
@@ -405,6 +424,7 @@ def _load_provider_weight_rows(
         )
         SELECT
             snapshots.trade_date,
+            snapshots.snapshot_date,
             weights.security_id,
             weights.weight,
             industry.industry_code
@@ -429,8 +449,9 @@ def _load_provider_weight_rows(
             security_id=str(security_id),
             weight_value=float(weight_value) if weight_value is not None else None,
             industry_code=str(industry_code or ""),
+            snapshot_date=str(snapshot_date),
         )
-        for trade_date, security_id, weight_value, industry_code in rows
+        for trade_date, snapshot_date, security_id, weight_value, industry_code in rows
     ]
 
 
@@ -528,6 +549,12 @@ def _table_columns(conn: Any, table_name: str) -> set[str]:
 
 def _trade_timestamp(trade_date: str, time_value: str) -> str:
     return f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}T{time_value}"
+
+
+def _date_diff_days(start_date: str, end_date: str) -> int:
+    start = datetime.strptime(start_date, "%Y%m%d")
+    end = datetime.strptime(end_date, "%Y%m%d")
+    return (end - start).days
 
 
 def _resolve_project_path(path: Path | str) -> Path:

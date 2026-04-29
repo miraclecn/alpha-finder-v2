@@ -25,6 +25,8 @@ class BenchmarkStateStep:
     trade_date: str
     effective_at: str = ""
     available_at: str = ""
+    provider_snapshot_date: str = ""
+    snapshot_age_days: int = 0
     industry_weights: dict[str, float] = field(default_factory=dict)
     constituents: list[BenchmarkConstituent] = field(default_factory=list)
 
@@ -97,6 +99,8 @@ def load_benchmark_state_artifact(path: Path | str) -> BenchmarkStateArtifact:
                 trade_date=str(item["trade_date"]),
                 effective_at=str(item.get("effective_at", "")),
                 available_at=str(item.get("available_at", "")),
+                provider_snapshot_date=str(item.get("provider_snapshot_date", "")),
+                snapshot_age_days=int(item.get("snapshot_age_days", 0)),
                 industry_weights={
                     str(industry): float(weight)
                     for industry, weight in dict(item.get("industry_weights", {})).items()
@@ -129,6 +133,7 @@ def load_benchmark_state_artifact(path: Path | str) -> BenchmarkStateArtifact:
             steps=[
                 BenchmarkStateStep(
                     trade_date=str(trade_date),
+                    snapshot_age_days=0,
                     industry_weights={
                         str(industry): float(weight)
                         for industry, weight in dict(weights).items()
@@ -237,6 +242,10 @@ def _validate_benchmark_state_artifact(artifact: BenchmarkStateArtifact) -> None
 
 
 def _validate_benchmark_state_step(step: BenchmarkStateStep) -> None:
+    if step.snapshot_age_days < 0:
+        raise ValueError(
+            f"Benchmark snapshot_age_days cannot be negative on {step.trade_date}"
+        )
     total_industry_weight = sum(step.industry_weights.values())
     if any(weight < 0.0 for weight in step.industry_weights.values()):
         raise ValueError(

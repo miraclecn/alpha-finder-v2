@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 import os
 from pathlib import Path
+import time
 from typing import Any, Iterable
 
 
 DEFAULT_MEMBER_PAGE_SIZE = 3000
 DEFAULT_WEIGHT_PAGE_SIZE = 2000
+DEFAULT_MARKET_EVENT_PAGE_SIZE = 2000
 DEFAULT_INDEX_WEIGHT_WINDOW_MONTHS = 1
 DEFAULT_LEGACY_ENV_PATH = Path.home() / ".openclaw" / "workspace-data-collector" / ".env"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -23,6 +26,13 @@ INDUSTRY_LEVEL_DEFINITIONS = {
     "L2": ("sw2021_l2", "l2_code"),
     "L3": ("sw2021_l3", "l3_code"),
 }
+MARKET_EVENT_TABLES = (
+    "raw_dividend",
+    "raw_stk_limit",
+    "raw_suspend_d",
+    "raw_share_float",
+    "raw_repurchase",
+)
 
 
 @dataclass(slots=True)
@@ -66,7 +76,12 @@ def build_tushare_reference_db(
     industry_levels: tuple[str, ...] = ("L1", "L2", "L3"),
     member_page_size: int = DEFAULT_MEMBER_PAGE_SIZE,
     weight_page_size: int = DEFAULT_WEIGHT_PAGE_SIZE,
+    market_event_page_size: int = DEFAULT_MARKET_EVENT_PAGE_SIZE,
     index_weight_window_months: int = DEFAULT_INDEX_WEIGHT_WINDOW_MONTHS,
+    stage_market_events: bool = False,
+    market_event_start_date: str | None = None,
+    market_event_end_date: str | None = None,
+    market_event_request_interval_seconds: float = 0.0,
 ) -> dict[str, Any]:
     if not benchmarks:
         raise ValueError("Reference staging requires at least one benchmark definition.")
@@ -84,8 +99,18 @@ def build_tushare_reference_db(
         raise ValueError("Reference staging member_page_size must be positive.")
     if weight_page_size <= 0:
         raise ValueError("Reference staging weight_page_size must be positive.")
+    if market_event_page_size <= 0:
+        raise ValueError("Reference staging market_event_page_size must be positive.")
+    if market_event_request_interval_seconds < 0.0:
+        raise ValueError("Reference staging market_event_request_interval_seconds cannot be negative.")
     if index_weight_window_months <= 0:
         raise ValueError("Reference staging index_weight_window_months must be positive.")
+    event_start_date = market_event_start_date or start_date
+    event_end_date = market_event_end_date or end_date
+    if not event_start_date or not event_end_date:
+        raise ValueError("Reference staging market-event window requires explicit dates.")
+    if event_start_date > event_end_date:
+        raise ValueError("Reference staging market-event start_date cannot be after end_date.")
 
     if client is None:
         client = _build_tushare_client(load_tushare_token(token))
@@ -109,6 +134,23 @@ def build_tushare_reference_db(
     if not weight_rows:
         raise ValueError("Reference staging produced no benchmark weight rows.")
     membership_rows = _derive_membership_intervals(weight_rows)
+    market_event_rows = (
+        _fetch_market_event_rows(
+            client=client,
+            start_date=event_start_date,
+            end_date=event_end_date,
+            page_size=market_event_page_size,
+            request_interval_seconds=market_event_request_interval_seconds,
+        )
+        if stage_market_events
+        else {
+            "raw_dividend": [],
+            "raw_stk_limit": [],
+            "raw_suspend_d": [],
+            "raw_share_float": [],
+            "raw_repurchase": [],
+        }
+    )
 
     target_path = Path(target_db).expanduser().resolve()
     target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -117,6 +159,11 @@ def build_tushare_reference_db(
         industry_rows=industry_rows,
         membership_rows=membership_rows,
         weight_rows=weight_rows,
+        raw_dividend_rows=market_event_rows["raw_dividend"],
+        raw_stk_limit_rows=market_event_rows["raw_stk_limit"],
+        raw_suspend_d_rows=market_event_rows["raw_suspend_d"],
+        raw_share_float_rows=market_event_rows["raw_share_float"],
+        raw_repurchase_rows=market_event_rows["raw_repurchase"],
     )
     return {
         "target_db": str(target_path),
@@ -124,8 +171,82 @@ def build_tushare_reference_db(
         "industry_rows": len(industry_rows),
         "membership_rows": len(membership_rows),
         "weight_rows": len(weight_rows),
+        "raw_dividend_rows": len(market_event_rows["raw_dividend"]),
+        "raw_stk_limit_rows": len(market_event_rows["raw_stk_limit"]),
+        "raw_suspend_d_rows": len(market_event_rows["raw_suspend_d"]),
+        "raw_share_float_rows": len(market_event_rows["raw_share_float"]),
+        "raw_repurchase_rows": len(market_event_rows["raw_repurchase"]),
         "start_date": start_date,
         "end_date": end_date,
+        "market_event_start_date": event_start_date,
+        "market_event_end_date": event_end_date,
+    }
+
+
+def refresh_tushare_market_event_tables(
+    *,
+    target_db: str | Path,
+    start_date: str,
+    end_date: str,
+    token: str | None = None,
+    client: Any | None = None,
+    market_event_page_size: int = DEFAULT_MARKET_EVENT_PAGE_SIZE,
+    refresh_mode: str = "replace",
+    market_event_tables: tuple[str, ...] | None = None,
+    request_interval_seconds: float = 0.0,
+    sleep: Callable[[float], None] | None = None,
+    deduplicate_on_append: bool = True,
+) -> dict[str, Any]:
+    if not start_date or not end_date:
+        raise ValueError("Market-event refresh requires explicit start_date and end_date.")
+    if start_date > end_date:
+        raise ValueError("Market-event refresh start_date cannot be after end_date.")
+    if market_event_page_size <= 0:
+        raise ValueError("Market-event refresh page_size must be positive.")
+    if request_interval_seconds < 0.0:
+        raise ValueError("Market-event refresh request_interval_seconds cannot be negative.")
+    if refresh_mode not in {"replace", "append"}:
+        raise ValueError("Market-event refresh_mode must be 'replace' or 'append'.")
+    selected_tables = _normalize_market_event_tables(market_event_tables)
+
+    if client is None:
+        client = _build_tushare_client(load_tushare_token(token))
+
+    market_event_rows = _fetch_market_event_rows(
+        client=client,
+        start_date=start_date,
+        end_date=end_date,
+        page_size=market_event_page_size,
+        market_event_tables=selected_tables,
+        request_interval_seconds=request_interval_seconds,
+        sleep=sleep,
+    )
+
+    target_path = Path(target_db).expanduser().resolve()
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    _write_market_event_tables(
+        target_path=target_path,
+        raw_dividend_rows=market_event_rows["raw_dividend"],
+        raw_stk_limit_rows=market_event_rows["raw_stk_limit"],
+        raw_suspend_d_rows=market_event_rows["raw_suspend_d"],
+        raw_share_float_rows=market_event_rows["raw_share_float"],
+        raw_repurchase_rows=market_event_rows["raw_repurchase"],
+        refresh_mode=refresh_mode,
+        refresh_tables=selected_tables,
+        deduplicate_on_append=deduplicate_on_append,
+    )
+    return {
+        "target_db": str(target_path),
+        "raw_dividend_rows": len(market_event_rows["raw_dividend"]),
+        "raw_stk_limit_rows": len(market_event_rows["raw_stk_limit"]),
+        "raw_suspend_d_rows": len(market_event_rows["raw_suspend_d"]),
+        "raw_share_float_rows": len(market_event_rows["raw_share_float"]),
+        "raw_repurchase_rows": len(market_event_rows["raw_repurchase"]),
+        "start_date": start_date,
+        "end_date": end_date,
+        "refresh_mode": refresh_mode,
+        "market_event_tables": list(selected_tables),
+        "deduplicate_on_append": deduplicate_on_append,
     }
 
 
@@ -371,12 +492,482 @@ def _derive_membership_intervals(
     return sorted(intervals, key=lambda item: (item[0], item[1], item[2]))
 
 
+def _fetch_market_event_rows(
+    *,
+    client: Any,
+    start_date: str,
+    end_date: str,
+    page_size: int,
+    market_event_tables: tuple[str, ...] = MARKET_EVENT_TABLES,
+    request_interval_seconds: float = 0.0,
+    sleep: Callable[[float], None] | None = None,
+) -> dict[str, list[tuple[Any, ...]]]:
+    raw_dividend = [
+        _normalize_dividend_row(row)
+        for row in _fetch_optional_paginated_records(
+            client=client,
+            method_name="dividend",
+            page_size=page_size,
+            start_date=start_date,
+            end_date=end_date,
+            date_param="ex_date",
+            request_interval_seconds=request_interval_seconds,
+            sleep=sleep,
+        )
+    ] if "raw_dividend" in market_event_tables else []
+    raw_stk_limit = [
+        _normalize_stk_limit_row(row)
+        for row in _fetch_optional_paginated_records(
+            client=client,
+            method_name="stk_limit",
+            page_size=page_size,
+            start_date=start_date,
+            end_date=end_date,
+            window_mode="daily",
+            request_interval_seconds=request_interval_seconds,
+            sleep=sleep,
+        )
+    ] if "raw_stk_limit" in market_event_tables else []
+    raw_suspend_d = [
+        _normalize_suspend_d_row(row)
+        for row in _fetch_optional_paginated_records(
+            client=client,
+            method_name="suspend_d",
+            page_size=page_size,
+            start_date=start_date,
+            end_date=end_date,
+            window_mode="daily",
+            request_interval_seconds=request_interval_seconds,
+            sleep=sleep,
+        )
+    ] if "raw_suspend_d" in market_event_tables else []
+    raw_share_float = [
+        _normalize_share_float_row(row)
+        for row in _fetch_optional_paginated_records(
+            client=client,
+            method_name="share_float",
+            page_size=page_size,
+            start_date=start_date,
+            end_date=end_date,
+            date_param="ann_date",
+            request_interval_seconds=request_interval_seconds,
+            sleep=sleep,
+        )
+    ] if "raw_share_float" in market_event_tables else []
+    raw_repurchase = [
+        _normalize_repurchase_row(row)
+        for row in _fetch_optional_paginated_records(
+            client=client,
+            method_name="repurchase",
+            page_size=page_size,
+            start_date=start_date,
+            end_date=end_date,
+            date_param="ann_date",
+            request_interval_seconds=request_interval_seconds,
+            sleep=sleep,
+        )
+    ] if "raw_repurchase" in market_event_tables else []
+    return {
+        "raw_dividend": _unique_rows(raw_dividend),
+        "raw_stk_limit": _unique_rows(raw_stk_limit),
+        "raw_suspend_d": _unique_rows(raw_suspend_d),
+        "raw_share_float": _unique_rows(raw_share_float),
+        "raw_repurchase": _unique_rows(raw_repurchase),
+    }
+
+
+def _normalize_market_event_tables(market_event_tables: tuple[str, ...] | None) -> tuple[str, ...]:
+    if market_event_tables is None:
+        return MARKET_EVENT_TABLES
+    unique_tables = tuple(dict.fromkeys(market_event_tables))
+    invalid_tables = sorted(set(unique_tables) - set(MARKET_EVENT_TABLES))
+    if invalid_tables:
+        raise ValueError(
+            "Unsupported market-event table(s): " + ", ".join(invalid_tables)
+        )
+    if not unique_tables:
+        raise ValueError("Market-event refresh requires at least one selected table.")
+    return unique_tables
+
+
+def _unique_rows(rows: list[tuple[Any, ...]]) -> list[tuple[Any, ...]]:
+    return list(dict.fromkeys(rows))
+
+
+def _fetch_optional_paginated_records(
+    *,
+    client: Any,
+    method_name: str,
+    page_size: int,
+    start_date: str,
+    end_date: str,
+    date_param: str | None = None,
+    window_mode: str = "all",
+    request_interval_seconds: float = 0.0,
+    sleep: Callable[[float], None] | None = None,
+) -> list[dict[str, Any]]:
+    method = getattr(client, method_name, None)
+    if method is None:
+        return []
+
+    records: list[dict[str, Any]] = []
+    for query_params in _market_event_query_params(
+        start_date=start_date,
+        end_date=end_date,
+        date_param=date_param,
+        window_mode=window_mode,
+    ):
+        offset = 0
+        while True:
+            frame = method(
+                **query_params,
+                offset=offset,
+                limit=page_size,
+            )
+            _sleep_after_tushare_request(
+                request_interval_seconds=request_interval_seconds,
+                sleep=sleep,
+            )
+            page_rows = _dataframe_rows(frame)
+            if not page_rows:
+                break
+            records.extend(page_rows)
+            offset += len(page_rows)
+            if len(page_rows) < page_size:
+                break
+    return records
+
+
+def _sleep_after_tushare_request(
+    *,
+    request_interval_seconds: float,
+    sleep: Callable[[float], None] | None,
+) -> None:
+    if request_interval_seconds <= 0.0:
+        return
+    sleeper = sleep or time.sleep
+    sleeper(request_interval_seconds)
+
+
+def _market_event_query_params(
+    *,
+    start_date: str,
+    end_date: str,
+    date_param: str | None,
+    window_mode: str,
+) -> Iterable[dict[str, str]]:
+    if date_param:
+        for day, _ in _single_day_windows(start_date, end_date):
+            yield {date_param: day}
+        return
+    if window_mode == "daily":
+        for day, _ in _single_day_windows(start_date, end_date):
+            yield {"start_date": day, "end_date": day}
+        return
+    if window_mode == "monthly":
+        for window_start, window_end in _date_windows(start_date, end_date, 1):
+            yield {"start_date": window_start, "end_date": window_end}
+        return
+    if window_mode != "all":
+        raise ValueError(f"Unsupported market-event window_mode: {window_mode}")
+    yield {"start_date": start_date, "end_date": end_date}
+
+
+def _normalize_dividend_row(row: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        _clean_text(row.get("ts_code")),
+        _clean_date(row.get("end_date")),
+        _clean_date(row.get("ann_date")),
+        _clean_text(row.get("div_proc")),
+        _float_or_none(row.get("stk_div")),
+        _float_or_none(row.get("stk_bo_rate")),
+        _float_or_none(row.get("stk_co_rate")),
+        _float_or_none(row.get("cash_div")),
+        _float_or_none(row.get("cash_div_tax")),
+        _clean_date(row.get("record_date")),
+        _clean_date(row.get("ex_date")),
+        _clean_date(row.get("pay_date")),
+        _clean_date(row.get("div_listdate")),
+        "tushare.dividend",
+        None,
+    )
+
+
+def _normalize_stk_limit_row(row: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        _clean_text(row.get("ts_code")),
+        _clean_date(row.get("trade_date")),
+        _float_or_none(row.get("up_limit")),
+        _float_or_none(row.get("down_limit")),
+        "tushare.stk_limit",
+        None,
+    )
+
+
+def _normalize_suspend_d_row(row: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        _clean_text(row.get("ts_code")),
+        _clean_date(row.get("trade_date") or row.get("suspend_date")),
+        _clean_text(row.get("suspend_timing")),
+        _clean_text(row.get("suspend_type") or row.get("reason_type")),
+        "tushare.suspend_d",
+        None,
+    )
+
+
+def _normalize_share_float_row(row: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        _clean_text(row.get("ts_code")),
+        _clean_date(row.get("ann_date")),
+        _clean_date(row.get("float_date")),
+        _float_or_none(row.get("float_share")),
+        _float_or_none(row.get("float_ratio")),
+        _clean_text(row.get("holder_name")),
+        _clean_text(row.get("share_type")),
+        "tushare.share_float",
+        None,
+    )
+
+
+def _normalize_repurchase_row(row: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        _clean_text(row.get("ts_code")),
+        _clean_date(row.get("ann_date")),
+        _clean_date(row.get("end_date")),
+        _clean_text(row.get("proc")),
+        _clean_date(row.get("exp_date")),
+        _float_or_none(row.get("vol")),
+        _float_or_none(row.get("amount")),
+        _float_or_none(row.get("high_limit")),
+        _float_or_none(row.get("low_limit")),
+        "tushare.repurchase",
+        None,
+    )
+
+
+def _float_or_none(value: Any) -> float | None:
+    text = _clean_text(value)
+    if not text:
+        return None
+    return float(text)
+
+
+def _write_market_event_tables(
+    *,
+    target_path: Path,
+    raw_dividend_rows: list[tuple[Any, ...]],
+    raw_stk_limit_rows: list[tuple[Any, ...]],
+    raw_suspend_d_rows: list[tuple[Any, ...]],
+    raw_share_float_rows: list[tuple[Any, ...]],
+    raw_repurchase_rows: list[tuple[Any, ...]],
+    refresh_mode: str,
+    refresh_tables: tuple[str, ...],
+    deduplicate_on_append: bool,
+) -> None:
+    import duckdb
+
+    conn = duckdb.connect(str(target_path))
+    try:
+        _create_market_event_tables(
+            conn,
+            replace=refresh_mode == "replace",
+            table_names=refresh_tables,
+        )
+        _write_market_event_rows(
+            conn,
+            raw_dividend_rows=raw_dividend_rows,
+            raw_stk_limit_rows=raw_stk_limit_rows,
+            raw_suspend_d_rows=raw_suspend_d_rows,
+            raw_share_float_rows=raw_share_float_rows,
+            raw_repurchase_rows=raw_repurchase_rows,
+            delete_existing=refresh_mode == "replace",
+            table_names=refresh_tables,
+        )
+        if refresh_mode == "append" and deduplicate_on_append:
+            _deduplicate_market_event_tables(conn, table_names=refresh_tables)
+        _write_reference_dataset_registry(
+            conn,
+            **_industry_registry_source_args(conn),
+        )
+    finally:
+        conn.close()
+
+
+def _industry_registry_source_args(conn: Any) -> dict[str, str]:
+    if not _table_exists_current_db(conn, "industry_classification_pit_official_raw"):
+        return {}
+    manual_count = 0
+    if _table_exists_current_db(conn, "industry_classification_pit_manual_adjudication"):
+        manual_count = int(
+            conn.execute(
+                "SELECT count(*) FROM industry_classification_pit_manual_adjudication"
+            ).fetchone()[0]
+            or 0
+        )
+    return {
+        "industry_source_provider": "official_shenwan_packet",
+        "industry_note": _official_sw_industry_note(manual_count),
+    }
+
+
+def _create_market_event_tables(
+    conn: Any,
+    *,
+    replace: bool,
+    table_names: tuple[str, ...] = MARKET_EVENT_TABLES,
+) -> None:
+    create_table_sql = "CREATE OR REPLACE TABLE" if replace else "CREATE TABLE IF NOT EXISTS"
+    if "raw_dividend" in table_names:
+        conn.execute(
+            f"""
+            {create_table_sql} raw_dividend (
+                ts_code VARCHAR,
+                end_date VARCHAR,
+                ann_date VARCHAR,
+                div_proc VARCHAR,
+                stk_div DOUBLE,
+                stk_bo_rate DOUBLE,
+                stk_co_rate DOUBLE,
+                cash_div DOUBLE,
+                cash_div_tax DOUBLE,
+                record_date VARCHAR,
+                ex_date VARCHAR,
+                pay_date VARCHAR,
+                div_listdate VARCHAR,
+                source_table VARCHAR,
+                ingested_at TIMESTAMP
+            )
+            """
+        )
+    if "raw_stk_limit" in table_names:
+        conn.execute(
+            f"""
+            {create_table_sql} raw_stk_limit (
+                ts_code VARCHAR,
+                trade_date VARCHAR,
+                up_limit DOUBLE,
+                down_limit DOUBLE,
+                source_table VARCHAR,
+                ingested_at TIMESTAMP
+            )
+            """
+        )
+    if "raw_suspend_d" in table_names:
+        conn.execute(
+            f"""
+            {create_table_sql} raw_suspend_d (
+                ts_code VARCHAR,
+                trade_date VARCHAR,
+                suspend_timing VARCHAR,
+                suspend_type VARCHAR,
+                source_table VARCHAR,
+                ingested_at TIMESTAMP
+            )
+            """
+        )
+    if "raw_share_float" in table_names:
+        conn.execute(
+            f"""
+            {create_table_sql} raw_share_float (
+                ts_code VARCHAR,
+                ann_date VARCHAR,
+                float_date VARCHAR,
+                float_share DOUBLE,
+                float_ratio DOUBLE,
+                holder_name VARCHAR,
+                share_type VARCHAR,
+                source_table VARCHAR,
+                ingested_at TIMESTAMP
+            )
+            """
+        )
+    if "raw_repurchase" in table_names:
+        conn.execute(
+            f"""
+            {create_table_sql} raw_repurchase (
+                ts_code VARCHAR,
+                ann_date VARCHAR,
+                end_date VARCHAR,
+                proc VARCHAR,
+                exp_date VARCHAR,
+                vol DOUBLE,
+                amount DOUBLE,
+                high_limit DOUBLE,
+                low_limit DOUBLE,
+                source_table VARCHAR,
+                ingested_at TIMESTAMP
+            )
+            """
+        )
+
+
+def _write_market_event_rows(
+    conn: Any,
+    *,
+    raw_dividend_rows: list[tuple[Any, ...]],
+    raw_stk_limit_rows: list[tuple[Any, ...]],
+    raw_suspend_d_rows: list[tuple[Any, ...]],
+    raw_share_float_rows: list[tuple[Any, ...]],
+    raw_repurchase_rows: list[tuple[Any, ...]],
+    delete_existing: bool,
+    table_names: tuple[str, ...] = MARKET_EVENT_TABLES,
+) -> None:
+    if delete_existing:
+        for table_name in table_names:
+            conn.execute(f"DELETE FROM {table_name}")
+    if "raw_dividend" in table_names and raw_dividend_rows:
+        conn.executemany(
+            "INSERT INTO raw_dividend VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            raw_dividend_rows,
+        )
+    if "raw_stk_limit" in table_names and raw_stk_limit_rows:
+        conn.executemany(
+            "INSERT INTO raw_stk_limit VALUES (?, ?, ?, ?, ?, ?)",
+            raw_stk_limit_rows,
+        )
+    if "raw_suspend_d" in table_names and raw_suspend_d_rows:
+        conn.executemany(
+            "INSERT INTO raw_suspend_d VALUES (?, ?, ?, ?, ?, ?)",
+            raw_suspend_d_rows,
+        )
+    if "raw_share_float" in table_names and raw_share_float_rows:
+        conn.executemany(
+            "INSERT INTO raw_share_float VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            raw_share_float_rows,
+        )
+    if "raw_repurchase" in table_names and raw_repurchase_rows:
+        conn.executemany(
+            "INSERT INTO raw_repurchase VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            raw_repurchase_rows,
+        )
+
+
+def _deduplicate_market_event_tables(
+    conn: Any,
+    *,
+    table_names: tuple[str, ...] = MARKET_EVENT_TABLES,
+) -> None:
+    for table_name in table_names:
+        conn.execute(
+            f"""
+            CREATE OR REPLACE TABLE {table_name} AS
+            SELECT DISTINCT *
+            FROM {table_name}
+            """
+        )
+
+
 def _write_reference_db(
     *,
     target_path: Path,
     industry_rows: list[tuple[str, str, str, str, str | None]],
     membership_rows: list[tuple[str, str, str, str | None]],
     weight_rows: list[tuple[str, str, str, float]],
+    raw_dividend_rows: list[tuple[Any, ...]],
+    raw_stk_limit_rows: list[tuple[Any, ...]],
+    raw_suspend_d_rows: list[tuple[Any, ...]],
+    raw_share_float_rows: list[tuple[Any, ...]],
+    raw_repurchase_rows: list[tuple[Any, ...]],
 ) -> None:
     import duckdb
 
@@ -413,9 +1004,91 @@ def _write_reference_db(
             )
             """
         )
+        conn.execute(
+            """
+            CREATE OR REPLACE TABLE raw_dividend (
+                ts_code VARCHAR,
+                end_date VARCHAR,
+                ann_date VARCHAR,
+                div_proc VARCHAR,
+                stk_div DOUBLE,
+                stk_bo_rate DOUBLE,
+                stk_co_rate DOUBLE,
+                cash_div DOUBLE,
+                cash_div_tax DOUBLE,
+                record_date VARCHAR,
+                ex_date VARCHAR,
+                pay_date VARCHAR,
+                div_listdate VARCHAR,
+                source_table VARCHAR,
+                ingested_at TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE OR REPLACE TABLE raw_stk_limit (
+                ts_code VARCHAR,
+                trade_date VARCHAR,
+                up_limit DOUBLE,
+                down_limit DOUBLE,
+                source_table VARCHAR,
+                ingested_at TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE OR REPLACE TABLE raw_suspend_d (
+                ts_code VARCHAR,
+                trade_date VARCHAR,
+                suspend_timing VARCHAR,
+                suspend_type VARCHAR,
+                source_table VARCHAR,
+                ingested_at TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE OR REPLACE TABLE raw_share_float (
+                ts_code VARCHAR,
+                ann_date VARCHAR,
+                float_date VARCHAR,
+                float_share DOUBLE,
+                float_ratio DOUBLE,
+                holder_name VARCHAR,
+                share_type VARCHAR,
+                source_table VARCHAR,
+                ingested_at TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE OR REPLACE TABLE raw_repurchase (
+                ts_code VARCHAR,
+                ann_date VARCHAR,
+                end_date VARCHAR,
+                proc VARCHAR,
+                exp_date VARCHAR,
+                vol DOUBLE,
+                amount DOUBLE,
+                high_limit DOUBLE,
+                low_limit DOUBLE,
+                source_table VARCHAR,
+                ingested_at TIMESTAMP
+            )
+            """
+        )
         conn.execute("DELETE FROM industry_classification_pit")
         conn.execute("DELETE FROM benchmark_membership_pit")
         conn.execute("DELETE FROM benchmark_weight_snapshot_pit")
+        conn.execute("DELETE FROM raw_dividend")
+        conn.execute("DELETE FROM raw_stk_limit")
+        conn.execute("DELETE FROM raw_suspend_d")
+        conn.execute("DELETE FROM raw_share_float")
+        conn.execute("DELETE FROM raw_repurchase")
         conn.executemany(
             "INSERT INTO industry_classification_pit VALUES (?, ?, ?, ?, ?)",
             industry_rows,
@@ -428,6 +1101,31 @@ def _write_reference_db(
             "INSERT INTO benchmark_weight_snapshot_pit VALUES (?, ?, ?, ?)",
             weight_rows,
         )
+        if raw_dividend_rows:
+            conn.executemany(
+                "INSERT INTO raw_dividend VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                raw_dividend_rows,
+            )
+        if raw_stk_limit_rows:
+            conn.executemany(
+                "INSERT INTO raw_stk_limit VALUES (?, ?, ?, ?, ?, ?)",
+                raw_stk_limit_rows,
+            )
+        if raw_suspend_d_rows:
+            conn.executemany(
+                "INSERT INTO raw_suspend_d VALUES (?, ?, ?, ?, ?, ?)",
+                raw_suspend_d_rows,
+            )
+        if raw_share_float_rows:
+            conn.executemany(
+                "INSERT INTO raw_share_float VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                raw_share_float_rows,
+            )
+        if raw_repurchase_rows:
+            conn.executemany(
+                "INSERT INTO raw_repurchase VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                raw_repurchase_rows,
+            )
         _write_reference_dataset_registry(conn)
     finally:
         conn.close()
@@ -598,6 +1296,42 @@ def _write_reference_dataset_registry(
             FROM benchmark_weight_snapshot_pit
             """
         )
+    for table_name, note in (
+        ("raw_dividend", "staged Tushare dividend and bonus-share records for corporate-action ledger derivation"),
+        ("raw_stk_limit", "staged Tushare daily up/down limit prices for tradeability state"),
+        ("raw_suspend_d", "staged Tushare daily suspension records for tradeability state"),
+        ("raw_share_float", "staged Tushare share-float event records for audit only"),
+        ("raw_repurchase", "staged Tushare repurchase records for audit only"),
+    ):
+        if _table_exists_current_db(conn, table_name):
+            row_count = conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+            if row_count == 0:
+                continue
+            date_column = "trade_date"
+            if table_name == "raw_dividend":
+                date_column = "COALESCE(ex_date, ann_date)"
+            elif table_name == "raw_suspend_d":
+                date_column = "trade_date"
+            elif table_name == "raw_share_float":
+                date_column = "float_date"
+            elif table_name == "raw_repurchase":
+                date_column = "COALESCE(end_date, ann_date)"
+            conn.execute(
+                f"""
+                INSERT INTO reference_dataset_registry
+                SELECT
+                    '{table_name}',
+                    'tushare',
+                    'pit_reference_staging',
+                    'green',
+                    COUNT(*),
+                    MIN({date_column}),
+                    MAX({date_column}),
+                    ?
+                FROM {table_name}
+                """,
+                [note],
+            )
 
 
 def _dataframe_rows(frame: Any) -> list[dict[str, Any]]:
@@ -1805,6 +2539,15 @@ def _date_windows(
         window_end = min(_window_end(current, window_months), limit)
         yield current.strftime("%Y%m%d"), window_end.strftime("%Y%m%d")
         current = window_end + timedelta(days=1)
+
+
+def _single_day_windows(start_date: str, end_date: str) -> Iterable[tuple[str, str]]:
+    current = datetime.strptime(start_date, "%Y%m%d").date()
+    limit = datetime.strptime(end_date, "%Y%m%d").date()
+    while current <= limit:
+        day = current.strftime("%Y%m%d")
+        yield day, day
+        current += timedelta(days=1)
 
 
 def _window_end(start: date, window_months: int) -> date:

@@ -38,12 +38,37 @@ Current admission state:
 
 - `shadow_live_eligible`
 - not eligible for small-capital probation yet
-- eligible to build the gated paper-trade signal package because the multi-year
-  validation audit gate now passes
+- eligible to build the gated paper-trade signal package from the checked-in
+  multi-year audit because the attached portfolio-evidence data-quality gates
+  are clean; this does not waive the separate strategy-performance blockers
 - before shadow-live, historical performance must be evidenced with
-  `run-portfolio-backtest`, using adjusted daily OHLC prices for fills and
-  marks; `run-promotion-replay` remains a candidate comparison and
-  promotion-gate tool, not a real equity curve
+  `run-portfolio-backtest`, using raw unadjusted `daily_bar_pit` OHLC for
+  fills, marks, and price-limit diagnostics, plus explicit staged corporate
+  actions for cash and share adjustments; `run-promotion-replay` remains a
+  candidate comparison and promotion-gate tool, not a real equity curve
+- portfolio evidence must attach the market-data quality audit and report any
+  overlap with `corporate_action_exception_ledger`; the current `122` exception
+  windows are promotion-blocking unless explicitly excluded; the frozen
+  multi-year replay now binds `output/research_source.duckdb` and
+  `output/audits/market_data_quality_20260429.json`, and currently reports
+  `0` corporate-action exception exposures
+- portfolio backtest evidence must also report and block
+  `qfq_fallback_price_exposure` and `tradeability_fallback_exposure`; the
+  checked-in daily backtest currently reports `0` qfq fallback price exposures
+  and `0` tradeability fallback exposures
+- live-ready evidence must include benchmark-relative active portfolio metrics
+  from `run-portfolio-backtest`; the checked-in multi-year audit now carries
+  `active_backtest_information_ratio`, `active_backtest_active_annualized_return`,
+  and `active_backtest_tracking_error` so research replay IR is not mistaken
+  for tradable active IR
+- the daily backtest maintains a T+1 `available_shares` ledger and enforces
+  `min_trade_weight`; small non-liquidating trades are skipped with diagnostics,
+  while full liquidations remain allowed subject to tradeability and available
+  shares
+- generated research inputs must also bind the same source DB: trend inputs
+  exclude observations whose feature/label interval crosses a
+  `corporate_action_exception_ledger` or qfq-fallback window, and fundamental
+  inputs exclude observations whose label interval crosses one
 
 Current blockers that remain explicit:
 
@@ -58,6 +83,15 @@ Current blockers that remain explicit:
 - Beijing-board names are excluded from the live-tradable trend input, and the
   `302132.SZ` current-code history is covered through a narrow
   `security_code_alias_backfill` from legacy `300114.SZ` industry intervals
-- the checked-in multi-year audit artifact reports no blockers and
-  `signal_release_gate_met = true`
+- the checked-in multi-year audit artifact reports no data-quality blockers:
+  `corporate_action_exception_exposure_count = 0`,
+  `qfq_fallback_price_exposure_count = 0`,
+  `tradeability_fallback_exposure_count = 0`, and the audit-level
+  signal-release gate is met
+- the candidate remains blocked for probation capital by strategy-quality
+  evidence: the promotion replay still fails OOS IR, OOS t-stat, drawdown,
+  realized-versus-budget, and marginal-IR gates
 - the checked-in shadow-live journal contains fewer than `12` consecutive weekly cycles
+
+The remaining credibility work is tracked in
+`docs/superpowers/plans/2026-04-28-trusted-backtest-strategy-generation-risk-roadmap.md`.
