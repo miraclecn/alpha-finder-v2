@@ -9,6 +9,10 @@ only after all of the following are true:
 - the honest shadow-live journal contains at least `12` consecutive weekly cycles
 - the same journal spans at least `3` calendar months
 - the multi-year audited validation requirement is no longer an open blocker
+- the benchmark-relative strategy-quality gate has passed on the frozen
+  candidate version
+- the historical strategy evidence does not show unacceptable active IR,
+  drawdown, turnover, or cost drag
 
 ## Initial Capital Cap
 

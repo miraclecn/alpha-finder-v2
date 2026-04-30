@@ -54,6 +54,9 @@ _ALLOWED_CANDIDATE_STATUS = {
     "shadow_live_eligible",
     "probation_eligible",
 }
+_DEFAULT_STRATEGY_MIN_ACTIVE_IR = 0.30
+_DEFAULT_STRATEGY_MAX_DRAWDOWN = 0.18
+_DEFAULT_STRATEGY_MAX_TURNOVER = 50.0
 
 
 @dataclass(slots=True)
@@ -159,6 +162,9 @@ class MultiYearValidationAuditBuildCaseDefinition:
     replay_case_path: str = ""
     portfolio_backtest_result_path: str = ""
     minimum_calendar_years: float = 5.0
+    strategy_min_active_ir: float = _DEFAULT_STRATEGY_MIN_ACTIVE_IR
+    strategy_max_drawdown: float = _DEFAULT_STRATEGY_MAX_DRAWDOWN
+    strategy_max_turnover: float = 0.0
     as_of_date: str = ""
     notes: list[str] = field(default_factory=list)
 
@@ -190,6 +196,13 @@ class MultiYearValidationAuditBuildCaseDefinition:
                 data.get("portfolio_backtest_result_path", "")
             ),
             minimum_calendar_years=float(data.get("minimum_calendar_years", 5.0)),
+            strategy_min_active_ir=float(
+                data.get("strategy_min_active_ir", _DEFAULT_STRATEGY_MIN_ACTIVE_IR)
+            ),
+            strategy_max_drawdown=float(
+                data.get("strategy_max_drawdown", _DEFAULT_STRATEGY_MAX_DRAWDOWN)
+            ),
+            strategy_max_turnover=float(data.get("strategy_max_turnover", 0.0)),
             as_of_date=str(data.get("as_of_date", "")),
             notes=[str(item) for item in data.get("notes", [])],
         )
@@ -295,6 +308,11 @@ class MultiYearValidationAuditDefinition:
     active_backtest_information_ratio: float | None = None
     active_backtest_active_annualized_return: float | None = None
     active_backtest_tracking_error: float | None = None
+    active_backtest_max_drawdown: float | None = None
+    active_backtest_turnover: float | None = None
+    strategy_min_active_ir: float = _DEFAULT_STRATEGY_MIN_ACTIVE_IR
+    strategy_max_drawdown: float = _DEFAULT_STRATEGY_MAX_DRAWDOWN
+    strategy_max_turnover: float = _DEFAULT_STRATEGY_MAX_TURNOVER
     notes: list[str] = field(default_factory=list)
 
     @classmethod
@@ -361,6 +379,21 @@ class MultiYearValidationAuditDefinition:
             active_backtest_tracking_error=_optional_float(
                 data.get("active_backtest_tracking_error")
             ),
+            active_backtest_max_drawdown=_optional_float(
+                data.get("active_backtest_max_drawdown")
+            ),
+            active_backtest_turnover=_optional_float(
+                data.get("active_backtest_turnover")
+            ),
+            strategy_min_active_ir=float(
+                data.get("strategy_min_active_ir", _DEFAULT_STRATEGY_MIN_ACTIVE_IR)
+            ),
+            strategy_max_drawdown=float(
+                data.get("strategy_max_drawdown", _DEFAULT_STRATEGY_MAX_DRAWDOWN)
+            ),
+            strategy_max_turnover=float(
+                data.get("strategy_max_turnover", _DEFAULT_STRATEGY_MAX_TURNOVER)
+            ),
             notes=[str(item) for item in data.get("notes", [])],
         )
 
@@ -376,6 +409,10 @@ class MultiYearValidationAuditSummary:
     tradeability_fallback_exposure_count: int = 0
     market_data_fallback_exposure_count: int = 0
     active_backtest_information_ratio: float | None = None
+    active_backtest_max_drawdown: float | None = None
+    active_backtest_turnover: float | None = None
+    data_quality_gate_met: bool = False
+    strategy_quality_gate_met: bool = False
     blockers: list[str] = field(default_factory=list)
     signal_release_gate_met: bool = False
 
@@ -602,32 +639,55 @@ def evaluate_multi_year_validation_audit(
             definition.market_data_fallback_exposure_count
         ),
         active_backtest_information_ratio=definition.active_backtest_information_ratio,
+        active_backtest_max_drawdown=definition.active_backtest_max_drawdown,
+        active_backtest_turnover=definition.active_backtest_turnover,
     )
+    data_quality_blockers: list[str] = []
+    strategy_quality_blockers: list[str] = []
     if summary.calendar_years_covered < definition.minimum_calendar_years:
-        summary.blockers.append("minimum_history_years")
+        data_quality_blockers.append("minimum_history_years")
     if not definition.benchmark_membership_pit:
-        summary.blockers.append("benchmark_membership_pit")
+        data_quality_blockers.append("benchmark_membership_pit")
     if not definition.industry_classification_pit:
-        summary.blockers.append("industry_classification_pit")
+        data_quality_blockers.append("industry_classification_pit")
     if summary.failed_tradeability_checks:
-        summary.blockers.append("tradeability_realism")
+        data_quality_blockers.append("tradeability_realism")
     if summary.missing_market_states:
-        summary.blockers.append("market_state_coverage")
+        data_quality_blockers.append("market_state_coverage")
     if not definition.anchored_walk_forward_complete:
-        summary.blockers.append("anchored_walk_forward")
+        data_quality_blockers.append("anchored_walk_forward")
     if not definition.regime_split_complete:
-        summary.blockers.append("regime_split")
+        data_quality_blockers.append("regime_split")
     if not definition.portfolio_evidence_complete:
-        summary.blockers.append("portfolio_evidence")
+        data_quality_blockers.append("portfolio_evidence")
     if definition.active_backtest_information_ratio is None:
-        summary.blockers.append("active_backtest_ir")
+        data_quality_blockers.append("active_backtest_ir")
     if definition.corporate_action_exception_exposure_count > 0:
-        summary.blockers.append("corporate_action_exception_exposure")
+        data_quality_blockers.append("corporate_action_exception_exposure")
     if definition.qfq_fallback_price_exposure_count > 0:
-        summary.blockers.append("qfq_fallback_price_exposure")
+        data_quality_blockers.append("qfq_fallback_price_exposure")
     if definition.tradeability_fallback_exposure_count > 0:
-        summary.blockers.append("tradeability_fallback_exposure")
-    summary.signal_release_gate_met = not summary.blockers
+        data_quality_blockers.append("tradeability_fallback_exposure")
+    if (
+        definition.active_backtest_information_ratio is not None
+        and definition.active_backtest_information_ratio
+        < definition.strategy_min_active_ir
+    ):
+        strategy_quality_blockers.append("strategy_active_backtest_ir")
+    if definition.active_backtest_max_drawdown is None:
+        strategy_quality_blockers.append("strategy_max_drawdown_missing")
+    elif abs(definition.active_backtest_max_drawdown) > definition.strategy_max_drawdown:
+        strategy_quality_blockers.append("strategy_max_drawdown")
+    if definition.active_backtest_turnover is None:
+        strategy_quality_blockers.append("strategy_turnover_missing")
+    elif definition.active_backtest_turnover > definition.strategy_max_turnover:
+        strategy_quality_blockers.append("strategy_turnover")
+    summary.data_quality_gate_met = not data_quality_blockers
+    summary.strategy_quality_gate_met = not strategy_quality_blockers
+    summary.blockers = data_quality_blockers + strategy_quality_blockers
+    summary.signal_release_gate_met = (
+        summary.data_quality_gate_met and summary.strategy_quality_gate_met
+    )
     return EvaluatedMultiYearValidationAudit(
         definition=definition,
         summary=summary,
@@ -657,6 +717,8 @@ def build_multi_year_validation_audit(
     active_backtest_information_ratio: float | None = None
     active_backtest_active_annualized_return: float | None = None
     active_backtest_tracking_error: float | None = None
+    active_backtest_max_drawdown: float | None = None
+    active_backtest_turnover: float | None = None
     auto_notes = list(loaded_case.definition.notes)
 
     if loaded_case.replay_case is not None:
@@ -748,6 +810,10 @@ def build_multi_year_validation_audit(
         active_backtest_tracking_error = backtest_quality[
             "active_backtest_tracking_error"
         ]
+        active_backtest_max_drawdown = backtest_quality[
+            "active_backtest_max_drawdown"
+        ]
+        active_backtest_turnover = backtest_quality["active_backtest_turnover"]
         if (
             int(backtest_quality["corporate_action_exception_exposure_count"]) > 0
             or qfq_fallback_price_exposure_count > 0
@@ -817,6 +883,15 @@ def build_multi_year_validation_audit(
             active_backtest_active_annualized_return
         ),
         active_backtest_tracking_error=active_backtest_tracking_error,
+        active_backtest_max_drawdown=active_backtest_max_drawdown,
+        active_backtest_turnover=active_backtest_turnover,
+        strategy_min_active_ir=loaded_case.definition.strategy_min_active_ir,
+        strategy_max_drawdown=loaded_case.definition.strategy_max_drawdown,
+        strategy_max_turnover=(
+            loaded_case.definition.strategy_max_turnover
+            if loaded_case.definition.strategy_max_turnover > 0.0
+            else _DEFAULT_STRATEGY_MAX_TURNOVER
+        ),
         notes=auto_notes,
     )
 
@@ -874,6 +949,11 @@ def write_multi_year_validation_audit(
             definition.active_backtest_active_annualized_return
         ),
         "active_backtest_tracking_error": definition.active_backtest_tracking_error,
+        "active_backtest_max_drawdown": definition.active_backtest_max_drawdown,
+        "active_backtest_turnover": definition.active_backtest_turnover,
+        "strategy_min_active_ir": definition.strategy_min_active_ir,
+        "strategy_max_drawdown": definition.strategy_max_drawdown,
+        "strategy_max_turnover": definition.strategy_max_turnover,
         "notes": list(definition.notes),
     }
     with target.open("w", encoding="utf-8") as handle:
@@ -923,6 +1003,8 @@ def _load_portfolio_backtest_quality_evidence(path: Path | str) -> JsonMap:
         "active_backtest_tracking_error": _optional_float(
             summary.get("tracking_error")
         ),
+        "active_backtest_max_drawdown": _optional_float(summary.get("max_drawdown")),
+        "active_backtest_turnover": _optional_float(summary.get("turnover")),
     }
 
 

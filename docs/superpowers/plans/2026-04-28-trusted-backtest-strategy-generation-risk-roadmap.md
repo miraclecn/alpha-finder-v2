@@ -2,6 +2,14 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Current steering note, 2026-04-29:** This document is retained as the
+> technical backtest/data-quality roadmap and progress log. For project-level
+> priority and capital-admission sequencing, use
+> `docs/status/project-current-state-2026-04-29.md` and
+> `docs/superpowers/plans/2026-04-29-professional-quant-roadmap.md`.
+> Earlier unchecked checklist items below may be historical task text; prefer
+> the progress log and current-state document when they conflict.
+
 **Goal:** turn the current PIT-adjusted price and corporate-action repair into a staged path toward credible A-share portfolio backtests and constrained strategy generation.
 
 **Architecture:** Treat credibility as a chain of gates: materialized data truth, data-quality audit, broker-like backtest ledger, risk-aware research labels, constrained strategy generation, then shadow-live evidence. Each batch must leave a testable artifact and must not weaken the V2 object chain: `mandate -> thesis -> descriptor set -> sleeve -> portfolio recipe -> executable signal -> decay record`.

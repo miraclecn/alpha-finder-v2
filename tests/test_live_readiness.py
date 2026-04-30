@@ -190,21 +190,61 @@ class LiveReadinessTest(unittest.TestCase):
             loaded = load_live_candidate_bundle(temp_path)
             self.assertEqual(loaded.definition.account_export_contract_path, "")
 
-    def test_multi_year_validation_audit_reports_current_example_as_release_ready(self) -> None:
+    def test_multi_year_validation_audit_blocks_current_failed_strategy_quality(self) -> None:
         evaluation = evaluate_multi_year_validation_audit(
             EXAMPLE_ROOT / "trend_leadership_multi_year_validation_audit_v1.json"
         )
 
         self.assertEqual(evaluation.definition.candidate_id, "trend_leadership_shadow_live_v1")
-        self.assertTrue(evaluation.summary.signal_release_gate_met)
-        self.assertEqual(evaluation.summary.blockers, [])
+        self.assertFalse(evaluation.summary.signal_release_gate_met)
+        self.assertTrue(evaluation.summary.data_quality_gate_met)
+        self.assertFalse(evaluation.summary.strategy_quality_gate_met)
+        self.assertIn("strategy_active_backtest_ir", evaluation.summary.blockers)
+        self.assertIn("strategy_max_drawdown", evaluation.summary.blockers)
+        self.assertIn("strategy_turnover", evaluation.summary.blockers)
         self.assertEqual(evaluation.summary.qfq_fallback_price_exposure_count, 0)
         self.assertEqual(evaluation.summary.tradeability_fallback_exposure_count, 0)
+        self.assertAlmostEqual(
+            evaluation.summary.active_backtest_information_ratio,
+            -1.3305651774543863,
+        )
+        self.assertAlmostEqual(
+            evaluation.summary.active_backtest_max_drawdown,
+            -0.8920293917181733,
+        )
+        self.assertAlmostEqual(
+            evaluation.summary.active_backtest_turnover,
+            73.19514405135479,
+        )
         self.assertEqual(evaluation.definition.validation_window_start, "2021-03-05")
         self.assertEqual(evaluation.definition.validation_window_end, "2026-03-19")
         self.assertGreaterEqual(evaluation.summary.calendar_years_covered, 5.0)
         self.assertNotIn("anchored_walk_forward", evaluation.summary.blockers)
         self.assertNotIn("regime_split", evaluation.summary.blockers)
+
+    def test_multi_year_validation_audit_blocks_negative_ir_bad_drawdown_and_turnover(
+        self,
+    ) -> None:
+        payload = json.loads(
+            (EXAMPLE_ROOT / "trend_leadership_multi_year_validation_audit_v1.json")
+            .read_text(encoding="utf-8")
+        )
+        payload["active_backtest_information_ratio"] = -1.33
+        payload["active_backtest_max_drawdown"] = -0.892
+        payload["active_backtest_turnover"] = 73.20
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "audit.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+
+            evaluation = evaluate_multi_year_validation_audit(path)
+
+        self.assertTrue(evaluation.summary.data_quality_gate_met)
+        self.assertFalse(evaluation.summary.strategy_quality_gate_met)
+        self.assertFalse(evaluation.summary.signal_release_gate_met)
+        self.assertIn("strategy_active_backtest_ir", evaluation.summary.blockers)
+        self.assertIn("strategy_max_drawdown", evaluation.summary.blockers)
+        self.assertIn("strategy_turnover", evaluation.summary.blockers)
 
     def test_multi_year_validation_audit_blocks_exception_window_exposure(self) -> None:
         payload = json.loads(
@@ -274,8 +314,13 @@ class LiveReadinessTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["candidate_id"], "trend_leadership_shadow_live_v1")
-        self.assertTrue(payload["summary"]["signal_release_gate_met"])
-        self.assertEqual(payload["summary"]["blockers"], [])
+        self.assertTrue(payload["summary"]["data_quality_gate_met"])
+        self.assertFalse(payload["summary"]["strategy_quality_gate_met"])
+        self.assertFalse(payload["summary"]["signal_release_gate_met"])
+        self.assertIn(
+            "strategy_active_backtest_ir",
+            payload["summary"]["blockers"],
+        )
         self.assertEqual(payload["validation_window_start"], "2021-03-05")
         self.assertEqual(payload["validation_window_end"], "2026-03-19")
         self.assertGreaterEqual(payload["summary"]["calendar_years_covered"], 5.0)
@@ -343,6 +388,8 @@ class LiveReadinessTest(unittest.TestCase):
                                 "information_ratio": 0.42,
                                 "active_annualized_return": 0.031,
                                 "tracking_error": 0.074,
+                                "max_drawdown": -0.09,
+                                "turnover": 4.0,
                                 "corporate_action_exception_exposure_count": 0,
                                 "qfq_fallback_price_exposure_count": 0,
                                 "tradeability_fallback_exposure_count": 0,
@@ -377,6 +424,9 @@ class LiveReadinessTest(unittest.TestCase):
             self.assertTrue(definition.regime_split_complete)
             self.assertTrue(definition.portfolio_evidence_complete)
             self.assertAlmostEqual(definition.active_backtest_information_ratio, 0.42)
+            self.assertAlmostEqual(definition.active_backtest_max_drawdown, -0.09)
+            self.assertAlmostEqual(definition.active_backtest_turnover, 4.0)
+            self.assertTrue(evaluation.summary.strategy_quality_gate_met)
             self.assertNotIn("anchored_walk_forward", evaluation.summary.blockers)
             self.assertNotIn("regime_split", evaluation.summary.blockers)
             self.assertNotIn("portfolio_evidence", evaluation.summary.blockers)

@@ -118,12 +118,14 @@ and daily marks, book explicit corporate actions, and record cash, costs,
 blocked orders, partial fills, market-data fallback exposure, and drawdown
 from the portfolio ledger.
 The frozen live-candidate paper-trade case is stricter:
-it requires the attached multi-year validation audit gate before rebuilding a
-fresh signal. The checked-in audit is currently clean on the data-quality
-release gates because the attached daily backtest reports zero
-corporate-action-exception, qfq-fallback, and tradeability-fallback exposures.
-That only clears data-contamination risk; the strategy still needs separate
-performance evidence before probation capital.
+it requires a clean attached multi-year data-quality audit and a separate
+strategy-quality gate before rebuilding a fresh signal. The checked-in audit is
+currently clean on the data-quality release gates because the attached daily
+backtest reports zero corporate-action-exception, qfq-fallback, and
+tradeability-fallback exposures. That only clears data-contamination risk. The
+current strategy evidence fails: the overlay daily portfolio backtest reports
+active IR `-1.33`, active annualized return `-41.02%`, max drawdown `-89.20%`,
+and turnover `73.20x`.
 The audit file is no longer intended to be hand-maintained:
 `build-multi-year-validation-audit` now rebuilds it from the attached
 benchmark-state, trend-observation inputs, the generated overlay-observation

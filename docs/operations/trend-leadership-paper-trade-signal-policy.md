@@ -8,13 +8,19 @@ manual signal execution in a simulated account.
 ## Release Rule
 
 Before any new `trend_leadership_shadow_live_v1` signal is emitted, the frozen
-candidate must pass its attached multi-year validation audit gate.
+candidate must pass both:
+
+- its attached multi-year data-quality validation audit gate
+- a strategy-quality gate based on benchmark-relative daily portfolio backtest
+  evidence
 
 That gate is not satisfied by:
 
 - one short favorable window
 - a replay that omits PIT benchmark or industry history
 - a portfolio path that ignores blocked exits, residual cash, or stressed cost
+- a clean data-quality audit paired with negative active IR, unacceptable
+  drawdown, or economically unjustified turnover
 
 ## Allowed State Source
 
@@ -35,5 +41,8 @@ Both are acceptable only if they preserve:
 
 - No broker automation.
 - No real-account requirement in the pre-signal acceptance path.
-- No signal release while the multi-year validation audit gate is blocked.
+- No signal release while the multi-year data-quality validation audit gate is
+  blocked.
+- No signal release while the benchmark-relative strategy-quality gate is
+  blocked.
 - No spreadsheet-side repair that removes blocked holdings or cash drag.

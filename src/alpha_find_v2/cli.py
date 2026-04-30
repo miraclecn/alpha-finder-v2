@@ -74,6 +74,10 @@ from .portfolio_backtester import (
     run_loaded_portfolio_backtest,
     write_portfolio_backtest_artifact,
 )
+from .strategy_failure_attribution import (
+    build_strategy_failure_attribution,
+    write_strategy_failure_attribution,
+)
 from .research_artifact_loader import (
     load_sleeve_artifact_build_case,
     load_portfolio_promotion_replay_case,
@@ -649,6 +653,41 @@ def _parse_args() -> argparse.Namespace:
         help="Path to the portfolio-backtest case TOML file.",
     )
 
+    explain_strategy_failure = subparsers.add_parser(
+        "explain-strategy-failure",
+        help="Build a strategy failure attribution report from a daily portfolio backtest.",
+    )
+    explain_strategy_failure.add_argument(
+        "--backtest",
+        required=True,
+        help="Path to a portfolio_backtest_result JSON artifact.",
+    )
+    explain_strategy_failure.add_argument(
+        "--source-db",
+        required=True,
+        help="Path to the DuckDB source used by the backtest.",
+    )
+    explain_strategy_failure.add_argument(
+        "--output",
+        required=True,
+        help="Path to write the strategy failure attribution JSON report.",
+    )
+    explain_strategy_failure.add_argument(
+        "--overlay-observations",
+        default=None,
+        help="Optional regime overlay observation history JSON path.",
+    )
+    explain_strategy_failure.add_argument(
+        "--overlay-config",
+        default=None,
+        help="Optional regime overlay TOML path.",
+    )
+    explain_strategy_failure.add_argument(
+        "--industry-schema",
+        default="sw2021_l1",
+        help="PIT industry schema to use for industry contribution.",
+    )
+
     build_executable_signal = subparsers.add_parser(
         "build-executable-signal",
         help="Build an executable signal package from a deployment case.",
@@ -1140,6 +1179,30 @@ def main() -> None:
                 "description": loaded_case.definition.description,
                 "output_path": str(output_path),
                 "summary": asdict(result.summary) if result.summary is not None else None,
+            }
+        )
+        return
+
+    if args.command == "explain-strategy-failure":
+        report = build_strategy_failure_attribution(
+            backtest_path=Path(args.backtest),
+            source_db_path=Path(args.source_db),
+            overlay_observations_path=(
+                Path(args.overlay_observations)
+                if args.overlay_observations is not None
+                else None
+            ),
+            overlay_config_path=(
+                Path(args.overlay_config) if args.overlay_config is not None else None
+            ),
+            industry_schema=args.industry_schema,
+        )
+        output_path = write_strategy_failure_attribution(report, Path(args.output))
+        _dump_json(
+            {
+                "case_id": report["backtest"]["case_id"],
+                "output_path": str(output_path),
+                "loss_concentration": report["loss_concentration"]["classification"],
             }
         )
         return

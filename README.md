@@ -70,6 +70,7 @@ tables remain honest.
 - `config/promotion_gates`: portfolio-level promotion criteria for sleeve admission
 - `config/decay_monitors`: versioned rules for post-promotion watch and retirement decisions
 - `docs/architecture`: system principles and operating model
+- `docs/status`: current project state and evidence summaries
 - `docs/data`: V2 data boundary and PIT audit rules
 - `docs/migration`: V1 to V2 boundary documents
 - `research/examples`: persisted replay and deployment cases plus sample sleeve, benchmark-state, and account-state artifacts
@@ -168,8 +169,11 @@ Note:
   live-readiness history blocker.
 - The checked-in trend live-candidate chain now rebuilds on the widened
   `2021-03-05` through `2026-04-23` input calendar. The replay validation window
-  ends at `2026-03-19` because the sleeve target exits at T+20, and the
-  multi-year audit covers `5.0404` calendar years with no blockers.
+  ends at `2026-03-19` because the sleeve target exits at T+20. The attached
+  portfolio evidence is clean on data-quality blockers, but the strategy fails
+  finance-grade admission: the current overlay backtest has active IR `-1.33`,
+  active annualized return `-41.02%`, max drawdown `-89.20%`, and turnover
+  `73.20x`.
 - Beijing-board names are excluded from the live-tradable trend input.
   `302132.SZ` is resolved through a narrow `security_code_alias_backfill` from
   legacy `300114.SZ` industry intervals. `chinext` and `star` names remain in
@@ -178,6 +182,9 @@ Note:
 - `run-promotion-replay` now emits replay diagnostics for sleeve overlap,
   candidate-only contribution, concentration, and the best/worst incremental
   periods so portfolio tuning can be guided by economic evidence.
+- Current status is summarized in
+  `docs/status/project-current-state-2026-04-29.md`, and the forward work plan
+  is `docs/superpowers/plans/2026-04-29-professional-quant-roadmap.md`.
 
 ## Operating Principle
 

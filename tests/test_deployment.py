@@ -283,6 +283,33 @@ class DeploymentLayerTest(unittest.TestCase):
         )
         self.assertEqual(payload["package"]["regime_overlay_state"], "cash_heavier")
 
+    def test_cli_build_executable_signal_blocks_current_failed_strategy_quality(
+        self,
+    ) -> None:
+        result = subprocess.run(
+            [
+                "python3",
+                "-m",
+                "alpha_find_v2",
+                "build-executable-signal",
+                "--case",
+                str(
+                    EXAMPLE_ROOT
+                    / "executable_signal_case_trend_live_candidate_with_overlay.toml"
+                ),
+            ],
+            cwd=PROJECT_ROOT,
+            env={"PYTHONPATH": "src"},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("strategy_active_backtest_ir", result.stderr)
+        self.assertIn("strategy_max_drawdown", result.stderr)
+        self.assertIn("strategy_turnover", result.stderr)
+
     def test_cli_build_run_manifest_allows_live_candidate_with_passing_multi_year_audit(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
@@ -345,6 +372,41 @@ class DeploymentLayerTest(unittest.TestCase):
                 "trend_live_candidate_portfolio_with_overlay",
             )
             self.assertEqual(written_manifest["regime_overlay_state"], "cash_heavier")
+
+    def test_cli_build_run_manifest_blocks_current_failed_strategy_quality(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest_path = Path(temp_dir) / "trend_live_candidate_run_manifest.json"
+            case_text = (
+                (EXAMPLE_ROOT / "run_manifest_case_trend_live_candidate_2026_04_20.toml")
+                .read_text(encoding="utf-8")
+                .replace(
+                    "research/examples/deployment_minimal/trend_live_candidate_run_manifest_2026_04_20.json",
+                    str(manifest_path),
+                )
+            )
+            case_path = Path(temp_dir) / "run_manifest_case.toml"
+            case_path.write_text(case_text, encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    "-m",
+                    "alpha_find_v2",
+                    "build-run-manifest",
+                    "--case",
+                    str(case_path),
+                ],
+                cwd=PROJECT_ROOT,
+                env={"PYTHONPATH": "src"},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("strategy_active_backtest_ir", result.stderr)
+        self.assertIn("strategy_max_drawdown", result.stderr)
+        self.assertIn("strategy_turnover", result.stderr)
 
     def test_cli_build_executable_signal_blocks_live_candidate_with_exception_exposure(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -431,6 +493,12 @@ class DeploymentLayerTest(unittest.TestCase):
         audit_payload["qfq_fallback_price_exposure_count"] = 0
         audit_payload["tradeability_fallback_exposure_count"] = 0
         audit_payload["market_data_fallback_exposure_count"] = 0
+        audit_payload["active_backtest_information_ratio"] = 0.42
+        audit_payload["active_backtest_max_drawdown"] = -0.09
+        audit_payload["active_backtest_turnover"] = 4.0
+        audit_payload["strategy_min_active_ir"] = 0.30
+        audit_payload["strategy_max_drawdown"] = 0.18
+        audit_payload["strategy_max_turnover"] = 42.0
         path.write_text(
             json.dumps(audit_payload, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",

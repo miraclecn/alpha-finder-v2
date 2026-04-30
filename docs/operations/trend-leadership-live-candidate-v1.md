@@ -34,13 +34,15 @@ Live universe policy:
   regime through liquidity, cost, price-limit-lock, concentration, and exposure
   controls unless the mandate later narrows the investable universe
 
-Current admission state:
+Current finance admission state:
 
-- `shadow_live_eligible`
-- not eligible for small-capital probation yet
-- eligible to build the gated paper-trade signal package from the checked-in
-  multi-year audit because the attached portfolio-evidence data-quality gates
-  are clean; this does not waive the separate strategy-performance blockers
+- data-quality gate clean for the attached portfolio evidence
+- strategy-quality gate failed
+- not eligible for new paper-trade signal release under a finance-grade
+  admission standard
+- not eligible for small-capital probation
+- the checked-in bundle remains useful as a reproducible failure case and
+  diagnostic baseline, not as a capital candidate
 - before shadow-live, historical performance must be evidenced with
   `run-portfolio-backtest`, using raw unadjusted `daily_bar_pit` OHLC for
   fills, marks, and price-limit diagnostics, plus explicit staged corporate
@@ -87,11 +89,15 @@ Current blockers that remain explicit:
   `corporate_action_exception_exposure_count = 0`,
   `qfq_fallback_price_exposure_count = 0`,
   `tradeability_fallback_exposure_count = 0`, and the audit-level
-  signal-release gate is met
-- the candidate remains blocked for probation capital by strategy-quality
-  evidence: the promotion replay still fails OOS IR, OOS t-stat, drawdown,
-  realized-versus-budget, and marginal-IR gates
+  data-quality gate is met
+- the candidate remains blocked by strategy-quality evidence: the overlay daily
+  portfolio backtest reports active IR `-1.33`, active annualized return
+  `-41.02%`, max drawdown `-89.20%`, and turnover `73.20x`; promotion replay
+  also fails OOS IR, OOS t-stat, drawdown, realized-versus-budget, and
+  marginal-IR gates
 - the checked-in shadow-live journal contains fewer than `12` consecutive weekly cycles
 
 The remaining credibility work is tracked in
+`docs/superpowers/plans/2026-04-29-professional-quant-roadmap.md`, with the
+technical backtest/data roadmap retained in
 `docs/superpowers/plans/2026-04-28-trusted-backtest-strategy-generation-risk-roadmap.md`.
