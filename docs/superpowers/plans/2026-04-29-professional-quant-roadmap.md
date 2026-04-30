@@ -116,12 +116,12 @@ attached portfolio evidence and fails the second layer.
 - If it rejects the thesis, it blocks further parameter search on this candidate
   version.
 
-- [ ] Read the attribution report and classify failure concentration.
-- [ ] Check whether the failure is consistent with A-share momentum crash,
+- [x] Read the attribution report and classify failure concentration.
+- [x] Check whether the failure is consistent with A-share momentum crash,
   liquidity overpayment, industry crowding, or target-timing error.
-- [ ] Document the decision in
+- [x] Document the decision in
   `docs/research/trend-leadership-failure-review-2026-04-29.md`.
-- [ ] If no coherent mechanism survives, mark the candidate as rejected in the
+- [x] If no coherent mechanism survives, mark the candidate as rejected in the
   operations doc and leave the bundle only as a reproducible failure artifact.
 
 ## Task 4: Add Strategy Generation Guardrails
@@ -142,14 +142,14 @@ attached portfolio evidence and fails the second layer.
   `ignore_tradeability` are rejected.
 - No generated strategy can enter promotion review without executable evidence.
 
-- [ ] Define a manifest dataclass and JSON loader.
-- [ ] Validate object-chain references.
-- [ ] Reject bare-return or friction-ignoring objectives.
-- [ ] Require evidence paths for data-quality audit and daily portfolio
+- [x] Define a manifest dataclass and JSON loader.
+- [x] Validate object-chain references.
+- [x] Reject bare-return or friction-ignoring objectives.
+- [x] Require evidence paths for data-quality audit and daily portfolio
   backtest.
-- [ ] Add CLI:
+- [x] Add CLI:
   `PYTHONPATH=src python3 -m alpha_find_v2 validate-generated-strategy --manifest path/to/manifest.json`.
-- [ ] Run
+- [x] Run
   `PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_strategy_generation_guardrails.py' -v`.
 
 ## Task 5: Resume Shadow-Live Only After Strategy-Quality Passes

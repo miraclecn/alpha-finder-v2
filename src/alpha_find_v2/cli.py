@@ -78,6 +78,7 @@ from .strategy_failure_attribution import (
     build_strategy_failure_attribution,
     write_strategy_failure_attribution,
 )
+from .strategy_generation_guardrails import validate_generated_strategy_manifest
 from .research_artifact_loader import (
     load_sleeve_artifact_build_case,
     load_portfolio_promotion_replay_case,
@@ -688,6 +689,16 @@ def _parse_args() -> argparse.Namespace:
         help="PIT industry schema to use for industry contribution.",
     )
 
+    validate_generated_strategy = subparsers.add_parser(
+        "validate-generated-strategy",
+        help="Validate a generated strategy manifest before promotion review.",
+    )
+    validate_generated_strategy.add_argument(
+        "--manifest",
+        required=True,
+        help="Path to a generated_strategy_manifest JSON file.",
+    )
+
     build_executable_signal = subparsers.add_parser(
         "build-executable-signal",
         help="Build an executable signal package from a deployment case.",
@@ -1203,6 +1214,25 @@ def main() -> None:
                 "case_id": report["backtest"]["case_id"],
                 "output_path": str(output_path),
                 "loss_concentration": report["loss_concentration"]["classification"],
+            }
+        )
+        return
+
+    if args.command == "validate-generated-strategy":
+        result = validate_generated_strategy_manifest(Path(args.manifest))
+        _dump_json(
+            {
+                "strategy_id": result.manifest.strategy_id,
+                "status": "validated",
+                "objectives": result.manifest.objectives,
+                "rejected_objectives": result.rejected_objectives,
+                "promotion_review_requested": (
+                    result.manifest.promotion_review_requested
+                ),
+                "promotion_review_allowed": result.promotion_review_allowed,
+                "bound_ids": result.bound_ids,
+                "evidence_paths": result.evidence_paths,
+                "blockers": result.blockers,
             }
         )
         return

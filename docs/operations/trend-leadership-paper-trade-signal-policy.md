@@ -22,6 +22,16 @@ That gate is not satisfied by:
 - a clean data-quality audit paired with negative active IR, unacceptable
   drawdown, or economically unjustified turnover
 
+## Candidate Disposition
+
+The frozen `trend_leadership_shadow_live_v1` candidate version is dispositioned
+as `thesis_rejected` by
+`docs/research/trend-leadership-failure-review-2026-04-29.md`.
+
+This candidate must not be rescued through parameter search or shadow-live
+catch-up. Its checked-in bundle remains only a reproducible failure artifact and
+diagnostic baseline.
+
 ## Allowed State Source
 
 Before real capital is in scope, deployment may start from either:
