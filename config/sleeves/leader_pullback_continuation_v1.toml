@@ -1,0 +1,22 @@
+id = "leader_pullback_continuation_v1"
+name = "Leader Pullback Continuation V1 Sleeve"
+mandate_id = "a_share_long_only_eod"
+thesis_id = "leader_pullback_continuation"
+descriptor_set_id = "leader_pullback_continuation_v1"
+target_id = "open_t1_to_open_t20_net_cost"
+universe = "investable_a_share_core"
+rebalance_frequency = "biweekly"
+target_holding_days = 20
+turnover_budget = 0.10
+execution_rule = "next_day_open"
+neutralization = ["industry"]
+
+[construction]
+selection = "rank_then_cap_weight"
+holding_count = 22
+weight_cap = 0.06
+
+[constraints]
+min_median_daily_turnover_cny_mn = 120
+exclude_price_limit_lock = true
+single_industry_name_cap = 3

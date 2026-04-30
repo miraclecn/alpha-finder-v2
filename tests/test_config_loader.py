@@ -45,6 +45,7 @@ class ConfigLoaderTest(unittest.TestCase):
                 "earnings_underreaction",
                 "flow_liquidity_reversal",
                 "fundamental_rerating",
+                "leader_pullback_continuation",
                 "trend_leadership",
             },
         )
@@ -180,6 +181,32 @@ class ConfigLoaderTest(unittest.TestCase):
         self.assertGreater(
             weights["trend_stability"],
             weights["medium_term_relative_strength"],
+        )
+
+    def test_leader_pullback_sleeve_binds_descriptor_set_and_constraints(self) -> None:
+        sleeve = load_sleeve(
+            CONFIG_ROOT / "sleeves" / "leader_pullback_continuation_v1.toml"
+        )
+        descriptor_set = load_descriptor_set(
+            CONFIG_ROOT / "descriptor_sets" / f"{sleeve.descriptor_set_id}.toml"
+        )
+
+        weights = {
+            component.descriptor_id: component.weight
+            for component in descriptor_set.components
+        }
+        self.assertEqual(sleeve.thesis_id, "leader_pullback_continuation")
+        self.assertEqual(sleeve.rebalance_frequency, "biweekly")
+        self.assertEqual(sleeve.construction["holding_count"], 22)
+        self.assertEqual(sleeve.constraints["single_industry_name_cap"], 3)
+        self.assertEqual(
+            weights,
+            {
+                "medium_term_relative_strength": 0.35,
+                "industry_relative_strength": 0.30,
+                "trend_stability": 0.25,
+                "turnover_confirmation": 0.10,
+            },
         )
 
     def test_real_output_replay_examples_bind_generated_second_trend_lane(self) -> None:
