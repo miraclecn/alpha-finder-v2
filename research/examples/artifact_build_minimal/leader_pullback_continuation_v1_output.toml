@@ -1,0 +1,8 @@
+schema_version = 1
+artifact_type = "sleeve_artifact_build_case"
+
+case_id = "leader_pullback_continuation_v1_output_build"
+description = "Build the leader-pullback continuation sleeve artifact directly from the generated output/leader_pullback_continuation_v1_input.json observation input."
+sleeve_path = "config/sleeves/leader_pullback_continuation_v1.toml"
+input_path = "output/leader_pullback_continuation_v1_input.json"
+output_path = "output/leader_pullback_continuation_v1_artifact.json"

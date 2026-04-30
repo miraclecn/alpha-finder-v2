@@ -264,6 +264,69 @@ class ConfigLoaderTest(unittest.TestCase):
             ["trend_leadership_core", "trend_resilience_core"],
         )
 
+    def test_leader_pullback_example_chain_points_to_new_sleeve(self) -> None:
+        trend_input_case = tomllib.loads(
+            (
+                PROJECT_ROOT
+                / "research/examples/trend_input_build_minimal/leader_pullback_continuation_v1.toml"
+            ).read_text(encoding="utf-8")
+        )
+        artifact_case = tomllib.loads(
+            (
+                PROJECT_ROOT
+                / "research/examples/artifact_build_minimal/leader_pullback_continuation_v1_output.toml"
+            ).read_text(encoding="utf-8")
+        )
+        replay_case = tomllib.loads(
+            (
+                PROJECT_ROOT
+                / "research/examples/promotion_replay_real_output_leader_pullback/replay_case.toml"
+            ).read_text(encoding="utf-8")
+        )
+        baseline_portfolio = tomllib.loads(
+            (
+                PROJECT_ROOT
+                / "research/examples/promotion_replay_real_output_leader_pullback/baseline_portfolio.toml"
+            ).read_text(encoding="utf-8")
+        )
+        candidate_portfolio = tomllib.loads(
+            (
+                PROJECT_ROOT
+                / "research/examples/promotion_replay_real_output_leader_pullback/candidate_portfolio.toml"
+            ).read_text(encoding="utf-8")
+        )
+        audit_case = tomllib.loads(
+            (
+                PROJECT_ROOT
+                / "research/examples/deployment_minimal/leader_pullback_continuation_multi_year_validation_audit_v1.toml"
+            ).read_text(encoding="utf-8")
+        )
+
+        self.assertEqual(
+            trend_input_case["sleeve_path"],
+            "config/sleeves/leader_pullback_continuation_v1.toml",
+        )
+        self.assertEqual(
+            artifact_case["input_path"],
+            "output/leader_pullback_continuation_v1_input.json",
+        )
+        self.assertEqual(
+            replay_case["artifact_paths"],
+            [
+                "output/trend_leadership_core_artifact.json",
+                "output/leader_pullback_continuation_v1_artifact.json",
+            ],
+        )
+        self.assertEqual(baseline_portfolio["sleeves"], ["trend_leadership_core"])
+        self.assertEqual(
+            candidate_portfolio["sleeves"],
+            ["leader_pullback_continuation_v1"],
+        )
+        self.assertEqual(
+            audit_case["trend_research_input_build_case_path"],
+            "research/examples/trend_input_build_minimal/leader_pullback_continuation_v1.toml",
+        )
+
     def test_target_references_versioned_risk_model(self) -> None:
         target = load_target(CONFIG_ROOT / "targets" / "open_t1_to_open_t20_residual_net_cost.toml")
         risk_model = load_risk_model(
