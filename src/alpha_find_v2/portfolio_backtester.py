@@ -19,6 +19,7 @@ from .config_loader import (
     load_portfolio,
     load_portfolio_construction_model,
     load_regime_overlay,
+    load_target,
 )
 from .live_state import BenchmarkStateArtifact, load_benchmark_state_artifact
 from .models import (
@@ -47,6 +48,7 @@ from .regime_overlay import (
     load_regime_overlay_observation_artifact,
 )
 from .research_artifact_loader import load_sleeve_artifact
+from .staggered_rebalance import apply_staggered_construction, tranche_count_for_policy
 
 
 JsonMap = dict[str, Any]
@@ -125,6 +127,7 @@ class PortfolioBacktestInput:
     artifacts: list[SleeveResearchArtifact]
     start_date: str
     end_date: str
+    tranche_count: int = 1
     initial_cash_cny: float = 10_000_000.0
     risk_free_rate_annual: float = 0.0
     benchmark_industry_weights_by_date: dict[str, dict[str, float]] = field(
@@ -755,6 +758,10 @@ class PortfolioBacktester:
             start_date=start_date,
             end_date=end_date,
             calendar=calendar,
+        )
+        construction = apply_staggered_construction(
+            construction,
+            tranche_count=backtest_input.tranche_count,
         )
         construction = self._apply_regime_overlay(backtest_input, construction)
         scheduled_steps = self._schedule_executions(
@@ -2078,6 +2085,10 @@ def run_loaded_portfolio_backtest(
             artifacts=loaded_case.artifacts,
             start_date=loaded_case.definition.start_date,
             end_date=loaded_case.definition.end_date,
+            tranche_count=_portfolio_tranche_count(
+                portfolio=loaded_case.portfolio,
+                artifacts=loaded_case.artifacts,
+            ),
             initial_cash_cny=loaded_case.definition.initial_cash_cny,
             risk_free_rate_annual=loaded_case.definition.risk_free_rate_annual,
             benchmark_industry_weights_by_date=benchmark_industry_weights,
@@ -2112,6 +2123,37 @@ def write_portfolio_backtest_artifact(
         json.dump(payload, handle, ensure_ascii=False, indent=2)
         handle.write("\n")
     return target
+
+
+def _portfolio_tranche_count(
+    *,
+    portfolio: PortfolioRecipe,
+    artifacts: list[SleeveResearchArtifact],
+) -> int:
+    if not portfolio.rebalance_policy.startswith("staggered_"):
+        return 1
+
+    target_ids = sorted(
+        {
+            artifact.target_id
+            for artifact in artifacts
+            if artifact.sleeve_id in portfolio.sleeves
+        }
+    )
+    if not target_ids:
+        raise ValueError(
+            f"Staggered portfolio {portfolio.id} must bind at least one sleeve artifact."
+        )
+    if len(target_ids) > 1:
+        raise ValueError(
+            "Staggered portfolio sleeves must share one target_id; found: "
+            + ", ".join(target_ids)
+        )
+    target = load_target(CONFIG_ROOT / "targets" / f"{target_ids[0]}.toml")
+    return tranche_count_for_policy(
+        rebalance_policy=portfolio.rebalance_policy,
+        horizon_days=target.horizon_days,
+    )
 
 
 def _is_cn_a_directional_open_lock(*, bar: DailyBar, direction: str) -> bool:

@@ -350,6 +350,69 @@ class PortfolioBacktesterTest(unittest.TestCase):
             -0.99,
         )
 
+    def test_staggered_two_tranche_backtest_keeps_previous_tranche_until_roll(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "source.duckdb"
+            _create_db(
+                db_path,
+                [
+                    {"security_id": "AAA", "trade_date": "20260105", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                    {"security_id": "AAA", "trade_date": "20260106", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                    {"security_id": "AAA", "trade_date": "20260107", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                    {"security_id": "AAA", "trade_date": "20260108", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                    {"security_id": "BBB", "trade_date": "20260106", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                    {"security_id": "BBB", "trade_date": "20260107", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                    {"security_id": "BBB", "trade_date": "20260108", "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "pre_close": 10.0},
+                ],
+            )
+            zero_cost = _zero_cost_model()
+            staggered_portfolio = PortfolioRecipe(
+                id="test_staggered_portfolio",
+                name="Test Staggered Portfolio",
+                mandate_id="a_share_long_only_eod",
+                benchmark="CSI 800",
+                rebalance_policy="staggered_biweekly",
+                description="Synthetic staggered portfolio.",
+                construction_model_id="test_model",
+                execution_policy_id="a_share_next_open_v1",
+                sleeves=["trend"],
+                allocation={"trend": 1.0},
+                constraints={"max_names": 4, "max_single_name_weight": 1.0},
+            )
+
+            result = PortfolioBacktester(
+                mandate=_mandate(),
+                portfolio=staggered_portfolio,
+                construction_model=_construction_model(),
+                execution_policy=_execution_policy(),
+                default_cost_model=zero_cost,
+                cost_models={zero_cost.id: zero_cost},
+                source_db_path=db_path,
+            ).run(
+                PortfolioBacktestInput(
+                    portfolio=staggered_portfolio,
+                    artifacts=[
+                        _artifact(
+                            [
+                                ("20260105", [("AAA", 1.0, 0.0)]),
+                                ("20260106", [("BBB", 1.0, 0.0)]),
+                            ]
+                        )
+                    ],
+                    start_date="20260105",
+                    end_date="20260108",
+                    initial_cash_cny=10_000.0,
+                    tranche_count=2,
+                )
+            )
+
+        buy_fills = [fill for fill in result.fills if fill.side == "buy"]
+        self.assertEqual([(fill.asset_id, fill.quantity) for fill in buy_fills], [("AAA", 500.0), ("BBB", 500.0)])
+        self.assertEqual(
+            result.daily_curve[-1].weights,
+            {"AAA": 0.5, "BBB": 0.5},
+        )
+
     def test_cash_ledger_costs_lot_rounding_and_no_leverage(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = Path(temp_dir) / "source.duckdb"

@@ -44,6 +44,7 @@ from .regime_overlay import (
     RegimeOverlayObservationArtifact,
     load_regime_overlay_observation_artifact,
 )
+from .staggered_rebalance import tranche_count_for_policy
 from .target_builder import TradeLegState
 
 
@@ -400,6 +401,14 @@ def load_portfolio_promotion_replay_case(
         baseline_portfolio=baseline_portfolio,
         candidate_portfolio=candidate_portfolio,
         artifacts=artifacts,
+        baseline_tranche_count=_portfolio_tranche_count(
+            portfolio=baseline_portfolio,
+            artifacts=artifacts,
+        ),
+        candidate_tranche_count=_portfolio_tranche_count(
+            portfolio=candidate_portfolio,
+            artifacts=artifacts,
+        ),
         regime_overlay=regime_overlay,
         regime_overlay_observations=(
             regime_overlay_observations.steps
@@ -579,6 +588,37 @@ def _load_gate(candidate_portfolio: PortfolioRecipe) -> PromotionGate | None:
         return None
     return load_promotion_gate(
         CONFIG_ROOT / "promotion_gates" / f"{candidate_portfolio.promotion_gate_id}.toml"
+    )
+
+
+def _portfolio_tranche_count(
+    *,
+    portfolio: PortfolioRecipe,
+    artifacts: list[SleeveResearchArtifact],
+) -> int:
+    if not portfolio.rebalance_policy.startswith("staggered_"):
+        return 1
+
+    target_ids = sorted(
+        {
+            artifact.target_id
+            for artifact in artifacts
+            if artifact.sleeve_id in portfolio.sleeves
+        }
+    )
+    if not target_ids:
+        raise ValueError(
+            f"Staggered portfolio {portfolio.id} must bind at least one sleeve artifact."
+        )
+    if len(target_ids) > 1:
+        raise ValueError(
+            "Staggered portfolio sleeves must share one target_id; found: "
+            + ", ".join(target_ids)
+        )
+    target = load_target(CONFIG_ROOT / "targets" / f"{target_ids[0]}.toml")
+    return tranche_count_for_policy(
+        rebalance_policy=portfolio.rebalance_policy,
+        horizon_days=target.horizon_days,
     )
 
 

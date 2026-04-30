@@ -352,6 +352,65 @@ max_industry_overweight = 0.30
             with self.assertRaisesRegex(ValueError, "must share the same target_id"):
                 load_portfolio_promotion_replay_case(case_path)
 
+    def test_load_portfolio_promotion_replay_case_infers_staggered_tranche_counts(self) -> None:
+        portfolio_text = """id = "staggered_weekly_portfolio"
+name = "Staggered Weekly Portfolio"
+mandate_id = "a_share_long_only_eod"
+benchmark = "CSI 800"
+rebalance_policy = "staggered_weekly"
+description = "Synthetic staggered portfolio for loader validation."
+construction_model_id = "a_share_core_blend"
+promotion_gate_id = "research_example_replay_gate"
+execution_policy_id = "a_share_next_open_v1"
+decay_monitor_id = "a_share_core_watch"
+sleeves = ["fundamental_rerating_core"]
+
+[allocation]
+fundamental_rerating_core = 1.0
+
+[constraints]
+max_names = 4
+max_single_name_weight = 0.60
+max_industry_overweight = 0.30
+"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            baseline_path = temp_root / "baseline.toml"
+            baseline_path.write_text(portfolio_text, encoding="utf-8")
+            candidate_path = temp_root / "candidate.toml"
+            candidate_path.write_text(
+                portfolio_text.replace(
+                    'id = "staggered_weekly_portfolio"',
+                    'id = "staggered_weekly_candidate"',
+                ),
+                encoding="utf-8",
+            )
+            case_path = temp_root / "replay_case.toml"
+            case_path.write_text(
+                "\n".join(
+                    [
+                        'schema_version = 1',
+                        'artifact_type = "portfolio_promotion_replay_case"',
+                        'case_id = "staggered_weekly_validation"',
+                        'description = "Infer tranche counts from staggered policy and target horizon."',
+                        f'baseline_portfolio_path = "{baseline_path}"',
+                        f'candidate_portfolio_path = "{candidate_path}"',
+                        f'default_cost_model_path = "{CONFIG_ROOT / "cost_models" / "base_a_share_cash.toml"}"',
+                        f'benchmark_state_path = "{EXAMPLE_ROOT / "benchmark_state_history.json"}"',
+                        'artifact_paths = [',
+                        f'  "{EXAMPLE_ROOT / "sleeve_artifacts" / "fundamental_rerating_core.json"}",',
+                        ']',
+                        'periods_per_year = 52',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            loaded_case = load_portfolio_promotion_replay_case(case_path)
+
+        self.assertEqual(loaded_case.replay_input.baseline_tranche_count, 4)
+        self.assertEqual(loaded_case.replay_input.candidate_tranche_count, 4)
+
     def test_load_sleeve_artifact_rejects_unknown_schema_version(self) -> None:
         payload = {
             "schema_version": 99,

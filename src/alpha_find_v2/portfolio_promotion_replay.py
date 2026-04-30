@@ -39,6 +39,7 @@ from .research_evaluator import (
     PortfolioResearchEvaluator,
     SimulationSummary,
 )
+from .staggered_rebalance import apply_staggered_construction
 
 
 @dataclass(slots=True)
@@ -137,6 +138,8 @@ class PortfolioPromotionReplayInput:
     baseline_portfolio: PortfolioRecipe
     candidate_portfolio: PortfolioRecipe
     artifacts: list[SleeveResearchArtifact] = field(default_factory=list)
+    baseline_tranche_count: int = 1
+    candidate_tranche_count: int = 1
     regime_overlay: RegimeOverlay | None = None
     regime_overlay_observations: list[RegimeOverlayObservationStep] = field(
         default_factory=list
@@ -399,11 +402,19 @@ class PortfolioPromotionReplay:
             portfolio=replay_input.baseline_portfolio,
             construction_model=self.construction_model,
         ).build(baseline_inputs)
+        baseline_construction = apply_staggered_construction(
+            baseline_construction,
+            tranche_count=replay_input.baseline_tranche_count,
+        )
         candidate_construction = PortfolioConstructor(
             mandate=self.mandate,
             portfolio=replay_input.candidate_portfolio,
             construction_model=self.construction_model,
         ).build(candidate_inputs)
+        candidate_construction = apply_staggered_construction(
+            candidate_construction,
+            tranche_count=replay_input.candidate_tranche_count,
+        )
 
         regime_overlay_summary = None
         regime_overlay_evidence = None
@@ -850,6 +861,8 @@ class PortfolioPromotionReplay:
                 )
                 for artifact in replay_input.artifacts
             ],
+            baseline_tranche_count=replay_input.baseline_tranche_count,
+            candidate_tranche_count=replay_input.candidate_tranche_count,
             periods_per_year=replay_input.periods_per_year,
             benchmark_industry_weights_by_date={
                 trade_date: weights

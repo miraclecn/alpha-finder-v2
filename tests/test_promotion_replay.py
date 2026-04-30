@@ -208,6 +208,101 @@ class PortfolioPromotionReplayTest(unittest.TestCase):
         self.assertEqual(result.diagnostics.best_periods[0].trade_date, "2026-04-20")
         self.assertEqual(result.diagnostics.worst_periods[0].trade_date, "2026-04-13")
 
+    def test_replay_supports_staggered_biweekly_two_tranche_construction(self) -> None:
+        staggered_portfolio = PortfolioRecipe(
+            id="staggered_candidate",
+            name="Staggered Candidate",
+            mandate_id="test_mandate",
+            benchmark="CSI 800",
+            rebalance_policy="staggered_biweekly",
+            description="Synthetic staggered portfolio.",
+            construction_model_id="test_construction",
+            promotion_gate_id="test_gate",
+            sleeves=["slow"],
+            allocation={"slow": 1.0},
+            constraints={
+                "max_names": 5,
+                "max_single_name_weight": 1.0,
+                "max_industry_overweight": 1.0,
+            },
+        )
+        artifact = SleeveResearchArtifact(
+            sleeve_id="slow",
+            mandate_id="test_mandate",
+            target_id="open_t1_to_open_t20_net_cost",
+            steps=[
+                SleeveResearchStep(
+                    trade_date="2026-06-01",
+                    records=[
+                        self._record(
+                            "AAA",
+                            rank=1,
+                            target_weight=1.0,
+                            realized_return=0.10,
+                            industry="bank",
+                        )
+                    ],
+                ),
+                SleeveResearchStep(
+                    trade_date="2026-06-15",
+                    records=[
+                        self._record(
+                            "BBB",
+                            rank=1,
+                            target_weight=1.0,
+                            realized_return=0.0,
+                            industry="tech",
+                        )
+                    ],
+                ),
+                SleeveResearchStep(
+                    trade_date="2026-06-29",
+                    records=[
+                        self._record(
+                            "CCC",
+                            rank=1,
+                            target_weight=1.0,
+                            realized_return=0.0,
+                            industry="industrial",
+                        )
+                    ],
+                ),
+            ],
+        )
+        replay_input = PortfolioPromotionReplayInput(
+            baseline_portfolio=staggered_portfolio,
+            candidate_portfolio=staggered_portfolio,
+            artifacts=[artifact],
+            periods_per_year=26,
+            benchmark_industry_weights_by_date={
+                "2026-06-01": {"bank": 1.0, "tech": 0.0, "industrial": 0.0},
+                "2026-06-15": {"bank": 0.0, "tech": 1.0, "industrial": 0.0},
+                "2026-06-29": {"bank": 0.0, "tech": 0.0, "industrial": 1.0},
+            },
+            cost_scenario_pass={"base": True},
+            regime_pass={"bull": True},
+            baseline_tranche_count=2,
+            candidate_tranche_count=2,
+        )
+
+        result = self.replay.replay(replay_input)
+
+        self.assertAlmostEqual(
+            result.candidate_construction.steps[0].combined_weights["AAA"],
+            0.50,
+        )
+        self.assertEqual(
+            result.candidate_construction.steps[1].combined_weights,
+            {"AAA": 0.50, "BBB": 0.50},
+        )
+        self.assertEqual(
+            result.candidate_construction.steps[2].combined_weights,
+            {"BBB": 0.50, "CCC": 0.50},
+        )
+        self.assertAlmostEqual(result.candidate_summary.average_turnover, 0.50)
+        self.assertAlmostEqual(result.candidate_simulation.steps[0].gross_return, 0.025)
+        self.assertAlmostEqual(result.candidate_simulation.steps[1].gross_return, 0.025)
+
     def test_replay_blocks_promotion_when_candidate_crosses_exception_window(self) -> None:
         replay_input = PortfolioPromotionReplayInput(
             baseline_portfolio=self._baseline_portfolio(),
