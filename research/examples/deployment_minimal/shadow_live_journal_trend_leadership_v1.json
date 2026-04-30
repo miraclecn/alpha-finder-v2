@@ -2,6 +2,7 @@
   "schema_version": 1,
   "artifact_type": "shadow_live_journal",
   "candidate_bundle_path": "research/examples/deployment_minimal/trend_leadership_live_candidate_v1.toml",
+  "source_db_path": "output/research_source.duckdb",
   "started_at": "2026-04-21",
   "cycles": [
     {

@@ -4,6 +4,8 @@ import subprocess
 import tempfile
 import unittest
 
+import duckdb
+
 from alpha_find_v2.live_readiness import (
     build_multi_year_validation_audit,
     evaluate_shadow_live_journal,
@@ -58,12 +60,17 @@ class LiveReadinessTest(unittest.TestCase):
         self.assertEqual(evaluation.summary.cycle_count, 1)
         self.assertEqual(evaluation.summary.calendar_month_count, 1)
         self.assertEqual(evaluation.summary.consecutive_weekly_cycles, 1)
+        self.assertTrue(evaluation.summary.data_quality_gate_met)
+        self.assertFalse(evaluation.summary.strategy_quality_gate_met)
         self.assertFalse(evaluation.summary.shadow_live_gate_met)
         self.assertFalse(evaluation.summary.probation_preferred_gate_met)
+        self.assertIn("strategy_quality_gate", evaluation.summary.blockers)
         self.assertEqual(evaluation.summary.overlay_state_counts["cash_heavier"], 1)
         self.assertAlmostEqual(evaluation.summary.average_realized_turnover, 0.64)
 
-    def test_shadow_live_journal_marks_gate_complete_after_12_weekly_cycles(self) -> None:
+    def test_shadow_live_journal_blocks_strategy_failed_candidate_after_12_weekly_cycles(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             bundle_path = EXAMPLE_ROOT / "trend_leadership_live_candidate_v1.toml"
@@ -125,8 +132,333 @@ class LiveReadinessTest(unittest.TestCase):
             self.assertEqual(evaluation.summary.cycle_count, 12)
             self.assertEqual(evaluation.summary.consecutive_weekly_cycles, 12)
             self.assertGreaterEqual(evaluation.summary.calendar_month_count, 3)
-            self.assertTrue(evaluation.summary.shadow_live_gate_met)
+            self.assertFalse(evaluation.summary.strategy_quality_gate_met)
+            self.assertFalse(evaluation.summary.shadow_live_gate_met)
             self.assertFalse(evaluation.summary.probation_preferred_gate_met)
+            self.assertIn("strategy_quality_gate", evaluation.summary.blockers)
+
+    def test_shadow_live_journal_marks_gate_complete_after_12_weekly_cycles_when_strategy_quality_passes(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            audit_path = temp_root / "multi_year_validation_audit.json"
+            bundle_path = temp_root / "trend_leadership_live_candidate_v1.toml"
+            journal_path = temp_root / "shadow_live_journal.json"
+
+            self._write_multi_year_validation_audit_copy(
+                target=audit_path,
+                active_backtest_information_ratio=0.42,
+                active_backtest_max_drawdown=-0.09,
+                active_backtest_turnover=4.0,
+            )
+            self._write_bundle_copy(
+                source=EXAMPLE_ROOT / "trend_leadership_live_candidate_v1.toml",
+                target=bundle_path,
+                audit_path=audit_path,
+            )
+
+            cycle_entries = []
+            for index in range(12):
+                trade_day = 20 + (7 * index)
+                month = 4 + ((trade_day - 1) // 28)
+                day = ((trade_day - 1) % 28) + 1
+                trade_date = f"2026-{month:02d}-{day:02d}"
+                execution_day = day + 1 if day < 28 else 28
+                execution_date = f"2026-{month:02d}-{execution_day:02d}"
+                run_id = f"trend_live_candidate_next_open_{trade_date}"
+                manifest_path = temp_root / f"run_manifest_{index}.json"
+                outcome_path = temp_root / f"manual_execution_outcome_{index}.json"
+                realized_path = temp_root / f"realized_trading_window_{index}.json"
+                self._write_manifest_copy(
+                    source=EXAMPLE_ROOT / "trend_live_candidate_run_manifest_2026_04_20.json",
+                    target=manifest_path,
+                    run_id=run_id,
+                    trade_date=trade_date,
+                    execution_date=execution_date,
+                    data_build_date=trade_date,
+                )
+                self._write_outcome_copy(
+                    source=EXAMPLE_ROOT / "trend_live_candidate_manual_execution_outcome_2026_04_21.json",
+                    target=outcome_path,
+                    run_id=run_id,
+                    trade_date=trade_date,
+                    execution_date=execution_date,
+                )
+                self._write_realized_copy(
+                    source=EXAMPLE_ROOT / "trend_live_candidate_realized_trading_window_2026_05_18.json",
+                    target=realized_path,
+                    run_id=run_id,
+                    evaluation_date=f"2026-{month:02d}-28",
+                    slippage_bps=6.0,
+                )
+                cycle_entries.append(
+                    {
+                        "run_manifest_path": str(manifest_path),
+                        "manual_execution_outcome_path": str(outcome_path),
+                        "realized_trading_window_path": str(realized_path),
+                    }
+                )
+
+            journal_payload = {
+                "schema_version": 1,
+                "artifact_type": "shadow_live_journal",
+                "candidate_bundle_path": str(bundle_path),
+                "started_at": "2026-04-21",
+                "cycles": cycle_entries,
+            }
+            journal_path.write_text(
+                json.dumps(journal_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            evaluation = evaluate_shadow_live_journal(journal_path)
+
+        self.assertTrue(evaluation.summary.data_quality_gate_met)
+        self.assertTrue(evaluation.summary.strategy_quality_gate_met)
+        self.assertEqual(evaluation.summary.cycle_count, 12)
+        self.assertEqual(evaluation.summary.consecutive_weekly_cycles, 12)
+        self.assertGreaterEqual(evaluation.summary.calendar_month_count, 3)
+        self.assertEqual(evaluation.summary.stale_cycle_count, 0)
+        self.assertEqual(evaluation.summary.runtime_blocked_entry_count, 0)
+        self.assertEqual(evaluation.summary.runtime_forced_exit_count, 0)
+        self.assertEqual(evaluation.summary.slippage_model_underestimated_count, 0)
+        self.assertTrue(evaluation.summary.shadow_live_gate_met)
+        self.assertFalse(evaluation.summary.probation_preferred_gate_met)
+
+    def test_shadow_live_journal_blocks_stale_market_data(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            audit_path = temp_root / "multi_year_validation_audit.json"
+            bundle_path = temp_root / "trend_leadership_live_candidate_v1.toml"
+            source_db_path = temp_root / "source.duckdb"
+            manifest_path = temp_root / "run_manifest.json"
+            outcome_path = temp_root / "manual_execution_outcome.json"
+            realized_path = temp_root / "realized_trading_window.json"
+            journal_path = temp_root / "shadow_live_journal.json"
+
+            self._write_multi_year_validation_audit_copy(
+                target=audit_path,
+                active_backtest_information_ratio=0.42,
+                active_backtest_max_drawdown=-0.09,
+                active_backtest_turnover=4.0,
+            )
+            self._write_bundle_copy(
+                source=EXAMPLE_ROOT / "trend_leadership_live_candidate_v1.toml",
+                target=bundle_path,
+                audit_path=audit_path,
+            )
+            self._write_shadow_live_source_db(
+                path=source_db_path,
+                calendar_dates=["2026-04-16", "2026-04-17", "2026-04-20"],
+                data_trade_dates=["2026-04-16"],
+            )
+            self._write_manifest_copy(
+                source=EXAMPLE_ROOT / "trend_live_candidate_run_manifest_2026_04_20.json",
+                target=manifest_path,
+                run_id="trend_live_candidate_next_open_2026_04_20",
+                trade_date="2026-04-20",
+                execution_date="2026-04-21",
+                data_build_date="2026-04-16",
+            )
+            self._write_outcome_copy(
+                source=EXAMPLE_ROOT / "trend_live_candidate_manual_execution_outcome_2026_04_21.json",
+                target=outcome_path,
+                run_id="trend_live_candidate_next_open_2026_04_20",
+                trade_date="2026-04-20",
+                execution_date="2026-04-21",
+            )
+            self._write_realized_copy(
+                source=EXAMPLE_ROOT / "trend_live_candidate_realized_trading_window_2026_05_18.json",
+                target=realized_path,
+                run_id="trend_live_candidate_next_open_2026_04_20",
+                evaluation_date="2026-05-18",
+                slippage_bps=6.0,
+            )
+            journal_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "artifact_type": "shadow_live_journal",
+                        "candidate_bundle_path": str(bundle_path),
+                        "source_db_path": str(source_db_path),
+                        "started_at": "2026-04-21",
+                        "cycles": [
+                            {
+                                "run_manifest_path": str(manifest_path),
+                                "manual_execution_outcome_path": str(outcome_path),
+                                "realized_trading_window_path": str(realized_path),
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            evaluation = evaluate_shadow_live_journal(journal_path)
+
+        self.assertEqual(evaluation.summary.stale_cycle_count, 1)
+        self.assertFalse(evaluation.summary.shadow_live_gate_met)
+        self.assertIn("stale_market_data", evaluation.summary.blockers)
+
+    def test_shadow_live_journal_flags_runtime_st_and_delisting_exposure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            audit_path = temp_root / "multi_year_validation_audit.json"
+            bundle_path = temp_root / "trend_leadership_live_candidate_v1.toml"
+            source_db_path = temp_root / "source.duckdb"
+            manifest_path = temp_root / "run_manifest.json"
+            outcome_path = temp_root / "manual_execution_outcome.json"
+            realized_path = temp_root / "realized_trading_window.json"
+            journal_path = temp_root / "shadow_live_journal.json"
+
+            self._write_multi_year_validation_audit_copy(
+                target=audit_path,
+                active_backtest_information_ratio=0.42,
+                active_backtest_max_drawdown=-0.09,
+                active_backtest_turnover=4.0,
+            )
+            self._write_bundle_copy(
+                source=EXAMPLE_ROOT / "trend_leadership_live_candidate_v1.toml",
+                target=bundle_path,
+                audit_path=audit_path,
+            )
+            self._write_shadow_live_source_db(
+                path=source_db_path,
+                calendar_dates=["2026-04-20"],
+                data_trade_dates=["2026-04-20"],
+                st_assets={"EEE"},
+                delist_dates={"DDD": "2026-04-20"},
+            )
+            self._write_manifest_copy(
+                source=EXAMPLE_ROOT / "trend_live_candidate_run_manifest_2026_04_20.json",
+                target=manifest_path,
+                run_id="trend_live_candidate_next_open_2026_04_20",
+                trade_date="2026-04-20",
+                execution_date="2026-04-21",
+                data_build_date="2026-04-20",
+            )
+            self._write_outcome_copy(
+                source=EXAMPLE_ROOT / "trend_live_candidate_manual_execution_outcome_2026_04_21.json",
+                target=outcome_path,
+                run_id="trend_live_candidate_next_open_2026_04_20",
+                trade_date="2026-04-20",
+                execution_date="2026-04-21",
+            )
+            self._write_realized_copy(
+                source=EXAMPLE_ROOT / "trend_live_candidate_realized_trading_window_2026_05_18.json",
+                target=realized_path,
+                run_id="trend_live_candidate_next_open_2026_04_20",
+                evaluation_date="2026-05-18",
+                slippage_bps=6.0,
+            )
+            journal_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "artifact_type": "shadow_live_journal",
+                        "candidate_bundle_path": str(bundle_path),
+                        "source_db_path": str(source_db_path),
+                        "started_at": "2026-04-21",
+                        "cycles": [
+                            {
+                                "run_manifest_path": str(manifest_path),
+                                "manual_execution_outcome_path": str(outcome_path),
+                                "realized_trading_window_path": str(realized_path),
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            evaluation = evaluate_shadow_live_journal(journal_path)
+
+        self.assertEqual(evaluation.summary.runtime_blocked_entry_count, 1)
+        self.assertEqual(evaluation.summary.runtime_forced_exit_count, 2)
+        self.assertFalse(evaluation.summary.shadow_live_gate_met)
+        self.assertIn("runtime_st_delist_guard", evaluation.summary.blockers)
+
+    def test_shadow_live_journal_compares_realized_vs_modeled_slippage(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            audit_path = temp_root / "multi_year_validation_audit.json"
+            bundle_path = temp_root / "trend_leadership_live_candidate_v1.toml"
+            manifest_path = temp_root / "run_manifest.json"
+            outcome_path = temp_root / "manual_execution_outcome.json"
+            realized_path = temp_root / "realized_trading_window.json"
+            journal_path = temp_root / "shadow_live_journal.json"
+
+            self._write_multi_year_validation_audit_copy(
+                target=audit_path,
+                active_backtest_information_ratio=0.42,
+                active_backtest_max_drawdown=-0.09,
+                active_backtest_turnover=4.0,
+            )
+            self._write_bundle_copy(
+                source=EXAMPLE_ROOT / "trend_leadership_live_candidate_v1.toml",
+                target=bundle_path,
+                audit_path=audit_path,
+            )
+            self._write_manifest_copy(
+                source=EXAMPLE_ROOT / "trend_live_candidate_run_manifest_2026_04_20.json",
+                target=manifest_path,
+                run_id="trend_live_candidate_next_open_2026_04_20",
+                trade_date="2026-04-20",
+                execution_date="2026-04-21",
+                data_build_date="2026-04-20",
+            )
+            self._write_outcome_copy(
+                source=EXAMPLE_ROOT / "trend_live_candidate_manual_execution_outcome_2026_04_21.json",
+                target=outcome_path,
+                run_id="trend_live_candidate_next_open_2026_04_20",
+                trade_date="2026-04-20",
+                execution_date="2026-04-21",
+            )
+            self._write_realized_copy(
+                source=EXAMPLE_ROOT / "trend_live_candidate_realized_trading_window_2026_05_18.json",
+                target=realized_path,
+                run_id="trend_live_candidate_next_open_2026_04_20",
+                evaluation_date="2026-05-18",
+                slippage_bps=16.0,
+            )
+            journal_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "artifact_type": "shadow_live_journal",
+                        "candidate_bundle_path": str(bundle_path),
+                        "started_at": "2026-04-21",
+                        "cycles": [
+                            {
+                                "run_manifest_path": str(manifest_path),
+                                "manual_execution_outcome_path": str(outcome_path),
+                                "realized_trading_window_path": str(realized_path),
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            evaluation = evaluate_shadow_live_journal(journal_path)
+
+        self.assertAlmostEqual(
+            evaluation.summary.average_modeled_slippage_bps,
+            (0.18 * 6.0 + 0.05 * 5.0) / 0.23,
+        )
+        self.assertAlmostEqual(evaluation.summary.average_realized_slippage_bps, 16.0)
+        self.assertEqual(evaluation.summary.slippage_model_underestimated_count, 1)
+        self.assertIn("slippage_model_underestimated", evaluation.summary.review_flags)
 
     def test_cli_validate_live_candidate_bundle_reports_summary(self) -> None:
         result = subprocess.run(
@@ -575,11 +907,16 @@ class LiveReadinessTest(unittest.TestCase):
         run_id: str,
         trade_date: str,
         execution_date: str,
+        data_build_date: str | None = None,
+        account_state_path: str | None = None,
     ) -> None:
         payload = json.loads(source.read_text(encoding="utf-8"))
         payload["run_id"] = run_id
         payload["trade_date"] = trade_date
         payload["execution_date"] = execution_date
+        payload["data_build_date"] = data_build_date or trade_date
+        if account_state_path is not None:
+            payload["account_state_path"] = account_state_path
         payload["package_id"] = (
             f"{payload['portfolio_id']}:{trade_date}"
         )
@@ -610,11 +947,150 @@ class LiveReadinessTest(unittest.TestCase):
         target: Path,
         run_id: str,
         evaluation_date: str,
+        slippage_bps: float | None = None,
     ) -> None:
         payload = json.loads(source.read_text(encoding="utf-8"))
         payload["run_id"] = run_id
         payload["evaluation_date"] = evaluation_date
+        if slippage_bps is not None:
+            payload.setdefault("realized_cost", {})
+            payload["realized_cost"]["slippage_bps"] = slippage_bps
         target.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    def _write_multi_year_validation_audit_copy(
+        self,
+        *,
+        target: Path,
+        active_backtest_information_ratio: float,
+        active_backtest_max_drawdown: float,
+        active_backtest_turnover: float,
+    ) -> None:
+        payload = json.loads(
+            (
+                EXAMPLE_ROOT / "trend_leadership_multi_year_validation_audit_v1.json"
+            ).read_text(encoding="utf-8")
+        )
+        payload["active_backtest_information_ratio"] = active_backtest_information_ratio
+        payload["active_backtest_max_drawdown"] = active_backtest_max_drawdown
+        payload["active_backtest_turnover"] = active_backtest_turnover
+        target.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+    def _write_bundle_copy(
+        self,
+        *,
+        source: Path,
+        target: Path,
+        audit_path: Path,
+    ) -> None:
+        target.write_text(
+            source.read_text(encoding="utf-8").replace(
+                'multi_year_validation_audit_path = "research/examples/deployment_minimal/trend_leadership_multi_year_validation_audit_v1.json"',
+                f'multi_year_validation_audit_path = "{audit_path}"',
+            ),
+            encoding="utf-8",
+        )
+
+    def _write_shadow_live_source_db(
+        self,
+        *,
+        path: Path,
+        calendar_dates: list[str],
+        data_trade_dates: list[str],
+        st_assets: set[str] | None = None,
+        delist_dates: dict[str, str] | None = None,
+    ) -> None:
+        st_assets = st_assets or set()
+        delist_dates = delist_dates or {}
+        conn = duckdb.connect(str(path))
+        conn.execute("CREATE TABLE market_trade_calendar (trade_date VARCHAR)")
+        conn.execute(
+            """
+            CREATE TABLE security_master_ref (
+                security_id VARCHAR,
+                symbol VARCHAR,
+                current_name VARCHAR,
+                exchange VARCHAR,
+                board VARCHAR,
+                area VARCHAR,
+                list_date VARCHAR,
+                delist_date VARCHAR,
+                is_hs VARCHAR,
+                is_a_share BOOLEAN,
+                ingested_at TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE daily_bar_pit (
+                security_id VARCHAR,
+                trade_date VARCHAR,
+                exchange VARCHAR,
+                board VARCHAR,
+                is_st BOOLEAN,
+                pre_close DOUBLE,
+                open DOUBLE,
+                high DOUBLE,
+                low DOUBLE,
+                close DOUBLE,
+                close_adj DOUBLE,
+                turnover_value_cny DOUBLE
+            )
+            """
+        )
+        conn.executemany(
+            "INSERT INTO market_trade_calendar VALUES (?)",
+            [(trade_date,) for trade_date in calendar_dates],
+        )
+        security_rows = []
+        for asset_id in ("AAA", "BBB", "CCC", "DDD", "EEE"):
+            security_rows.append(
+                (
+                    asset_id,
+                    asset_id,
+                    f"{'ST ' if asset_id in st_assets else ''}{asset_id}",
+                    "SZ",
+                    "main_board",
+                    "Shenzhen",
+                    "20200102",
+                    delist_dates.get(asset_id),
+                    "N",
+                    True,
+                )
+            )
+        conn.executemany(
+            """
+            INSERT INTO security_master_ref VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TIMESTAMP '2026-04-20 15:00:00')
+            """,
+            security_rows,
+        )
+        bar_rows = []
+        for trade_date in data_trade_dates:
+            for asset_id in ("AAA", "BBB", "CCC", "DDD", "EEE"):
+                bar_rows.append(
+                    (
+                        asset_id,
+                        trade_date,
+                        "SZ",
+                        "main_board",
+                        asset_id in st_assets,
+                        10.0,
+                        10.1,
+                        10.2,
+                        9.9,
+                        10.0,
+                        10.0,
+                        100_000_000.0,
+                    )
+                )
+        conn.executemany(
+            "INSERT INTO daily_bar_pit VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            bar_rows,
+        )
+        conn.close()
 
     def _write_multi_year_audit_case(
         self,

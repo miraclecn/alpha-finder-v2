@@ -197,11 +197,11 @@ attached portfolio evidence and fails the second layer.
 - The portfolio does not combine weak sleeves simply to make the object chain
   look complete.
 
-- [ ] Review whether `a_share_core` should remain a two-sleeve recipe or be
+- [x] Review whether `a_share_core` should remain a two-sleeve recipe or be
   documented as an inactive target recipe while trend diagnosis continues.
-- [ ] Record the decision in
+- [x] Record the decision in
   `docs/research/release-1-scope-review-2026-04-29.md`.
-- [ ] Update current-state documentation if the active release scope changes.
+- [x] Update current-state documentation if the active release scope changes.
 
 ## Verification Gates
 

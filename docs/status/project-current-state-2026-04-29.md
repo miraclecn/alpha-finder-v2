@@ -28,6 +28,7 @@ Current professional status:
 | Backtest ledger | improved | Raw fills/marks, explicit corporate actions, T+1, min trade, and fallback diagnostics exist. |
 | Control truthfulness | improved | Unsupported size/beta controls are not marked enforced. |
 | Current trend candidate | rejected for capital | Data-quality gate is clean, but active returns, drawdown, and turnover are unacceptable. |
+| Release-1 portfolio scope | inactive target recipe only | `a_share_core` remains a reference config, not an admitted capital path. |
 | Shadow-live evidence | insufficient | Journal has `1` cycle; minimum policy target is `12` consecutive weekly cycles. |
 
 ## Current Evidence
@@ -101,6 +102,23 @@ Professional interpretation:
 - It is not eligible for new paper-trade signal release under a finance-grade
   admission standard.
 - It is not eligible for small-capital probation.
+- `config/portfolio/a_share_core.toml` remains checked in, but only as an
+  inactive reference recipe while the frozen trend candidate is rejected and
+  the residual fundamental lane lacks audited inputs.
+
+## Release Scope
+
+The active release-1 scope is narrower than the checked-in two-sleeve
+`a_share_core` recipe.
+
+- `trend_leadership_shadow_live_v1` is a frozen diagnostic artifact, not an
+  active capital candidate.
+- `fundamental_rerating_core` remains paused until an audited
+  `output/open_t1_to_open_t20_residual_component_snapshot.json` exists.
+- `trend_resilience_core` remains a comparator lane, not an admitted second
+  sleeve.
+- `a_share_core` is therefore retained as an inactive target recipe rather than
+  an active release portfolio.
 
 ## What Is Current
 
@@ -110,6 +128,7 @@ Current truth sources:
 - Data boundary: `docs/data/v2-data-boundary-and-pit-audit.md`
 - V1 reuse boundary: `docs/data/v1-duckdb-reuse-audit.md`
 - Live-candidate operations: `docs/operations/trend-leadership-live-candidate-v1.md`
+- Release-scope review: `docs/research/release-1-scope-review-2026-04-29.md`
 - Trusted backtest and strategy-generation roadmap:
   `docs/superpowers/plans/2026-04-28-trusted-backtest-strategy-generation-risk-roadmap.md`
 - Forward professional roadmap:

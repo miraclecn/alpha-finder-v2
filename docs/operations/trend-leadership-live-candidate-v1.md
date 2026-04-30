@@ -19,6 +19,8 @@ It binds:
   `research/examples/deployment_minimal/trend_live_candidate_portfolio_backtest.toml`
 - paper-trade signal policy:
   `docs/operations/trend-leadership-paper-trade-signal-policy.md`
+- shadow-live journal:
+  `research/examples/deployment_minimal/shadow_live_journal_trend_leadership_v1.json`
 
 Expected candidate budgets before shadow-live:
 
@@ -71,6 +73,16 @@ Current finance admission state:
   exclude observations whose feature/label interval crosses a
   `corporate_action_exception_ledger` or qfq-fallback window, and fundamental
   inputs exclude observations whose label interval crosses one
+- shadow-live journal evaluation now also binds `output/research_source.duckdb`
+  so that stale-data and `security_master_ref` runtime checks are machine-checkable
+- `evaluate-shadow-live-journal` treats the following as hard blockers for
+  `shadow_live_gate_met`: failed multi-year data-quality gate, failed
+  strategy-quality gate, stale market data more than one trading session behind
+  the signal date, or any runtime ST / delisting exposure
+- the same journal reports probation review flags, rather than hard blockers,
+  for blocked-trade pressure, manual overrides, cash drag above the mandate
+  cash buffer, and realized slippage more than `5` bps above the modeled
+  slippage assumption
 
 Current blockers that remain explicit:
 
@@ -95,7 +107,11 @@ Current blockers that remain explicit:
   `-41.02%`, max drawdown `-89.20%`, and turnover `73.20x`; promotion replay
   also fails OOS IR, OOS t-stat, drawdown, realized-versus-budget, and
   marginal-IR gates
-- the checked-in shadow-live journal contains fewer than `12` consecutive weekly cycles
+- the checked-in shadow-live journal still has only `1` recorded cycle, so it
+  fails the `12`-cycle / `3`-calendar-month shadow-live gate
+- that same journal now machine-reports one blocked trade, one manual override,
+  `2.00%` cash drift, and realized slippage `16.0` bps versus modeled slippage
+  `5.78` bps; these are review flags even if the strategy-quality gate were clean
 
 The remaining credibility work is tracked in
 `docs/superpowers/plans/2026-04-29-professional-quant-roadmap.md`, with the

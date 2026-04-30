@@ -7,11 +7,14 @@ from pathlib import Path
 import tomllib
 from typing import Any
 
+import duckdb
+
 from .config_loader import (
     CONFIG_ROOT,
     PROJECT_ROOT,
     load_cost_model,
     load_descriptor_set,
+    load_mandate,
     load_execution_policy,
     load_portfolio,
     load_sleeve,
@@ -24,11 +27,16 @@ from .deployment_loader import (
     load_realized_trading_window,
     load_run_manifest,
 )
-from .live_state import BenchmarkStateArtifact, load_benchmark_state_artifact
+from .live_state import (
+    BenchmarkStateArtifact,
+    load_account_state_snapshot,
+    load_benchmark_state_artifact,
+)
 from .models import (
     CostModel,
     DescriptorSet,
     ExecutionPolicy,
+    Mandate,
     PortfolioRecipe,
     ResidualTarget,
     Sleeve,
@@ -57,6 +65,7 @@ _ALLOWED_CANDIDATE_STATUS = {
 _DEFAULT_STRATEGY_MIN_ACTIVE_IR = 0.30
 _DEFAULT_STRATEGY_MAX_DRAWDOWN = 0.18
 _DEFAULT_STRATEGY_MAX_TURNOVER = 50.0
+_DEFAULT_SLIPPAGE_UNDERESTIMATION_BPS = 5.0
 
 
 @dataclass(slots=True)
@@ -493,6 +502,7 @@ class ShadowLiveCycleDefinition:
 class ShadowLiveJournalDefinition:
     candidate_bundle_path: str
     started_at: str
+    source_db_path: str = ""
     cycles: list[ShadowLiveCycleDefinition] = field(default_factory=list)
 
     @classmethod
@@ -507,6 +517,7 @@ class ShadowLiveJournalDefinition:
             raise ValueError(f"Unsupported shadow live journal type: {artifact_type}")
         return cls(
             candidate_bundle_path=str(data["candidate_bundle_path"]),
+            source_db_path=str(data.get("source_db_path", "")),
             started_at=str(data["started_at"]),
             cycles=[
                 ShadowLiveCycleDefinition(
@@ -532,6 +543,14 @@ class ShadowLiveCycleTrace:
     exception_count: int
     cash_drift_weight: float
     realized_turnover: float
+    stale_market_data: bool = False
+    stale_market_data_sessions: int = 0
+    runtime_blocked_entry_assets: list[str] = field(default_factory=list)
+    runtime_forced_exit_assets: list[str] = field(default_factory=list)
+    modeled_slippage_bps: float = 0.0
+    realized_slippage_bps: float = 0.0
+    slippage_excess_bps: float = 0.0
+    slippage_model_underestimated: bool = False
 
 
 @dataclass(slots=True)
@@ -539,6 +558,8 @@ class ShadowLiveJournalSummary:
     cycle_count: int = 0
     calendar_month_count: int = 0
     consecutive_weekly_cycles: int = 0
+    data_quality_gate_met: bool = False
+    strategy_quality_gate_met: bool = False
     shadow_live_gate_met: bool = False
     probation_preferred_gate_met: bool = False
     overlay_state_counts: dict[str, int] = field(default_factory=dict)
@@ -549,6 +570,18 @@ class ShadowLiveJournalSummary:
     average_cash_drift_weight: float = 0.0
     average_realized_turnover: float = 0.0
     max_realized_turnover: float = 0.0
+    cash_drift_budget: float = 0.0
+    cash_drift_budget_breach_count: int = 0
+    stale_cycle_count: int = 0
+    runtime_blocked_entry_count: int = 0
+    runtime_forced_exit_count: int = 0
+    average_modeled_slippage_bps: float = 0.0
+    average_realized_slippage_bps: float = 0.0
+    slippage_model_underestimated_count: int = 0
+    blocked_trade_review_required: bool = False
+    manual_override_review_required: bool = False
+    blockers: list[str] = field(default_factory=list)
+    review_flags: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -597,12 +630,25 @@ def load_live_candidate_bundle(path: Path | str) -> LoadedLiveCandidateBundle:
 def evaluate_shadow_live_journal(path: Path | str) -> EvaluatedShadowLiveJournal:
     definition = ShadowLiveJournalDefinition.from_json(_read_json(path))
     bundle = load_live_candidate_bundle(definition.candidate_bundle_path)
+    audit = None
+    if bundle.definition.multi_year_validation_audit_path.strip():
+        audit = evaluate_multi_year_validation_audit(
+            bundle.definition.multi_year_validation_audit_path
+        )
+    mandate = load_mandate(
+        CONFIG_ROOT / "mandates" / f"{bundle.portfolio.mandate_id}.toml"
+    )
     cycles = [
-        _load_shadow_live_cycle(bundle=bundle, definition=cycle)
+        _load_shadow_live_cycle(
+            bundle=bundle,
+            mandate=mandate,
+            definition=cycle,
+            source_db_path=definition.source_db_path,
+        )
         for cycle in definition.cycles
     ]
     _validate_shadow_live_cycle_order(cycles)
-    summary = _shadow_live_summary(cycles)
+    summary = _shadow_live_summary(cycles, audit=audit, mandate=mandate)
     return EvaluatedShadowLiveJournal(
         definition=definition,
         bundle=bundle,
@@ -1103,7 +1149,9 @@ def _validate_live_candidate_bundle(
 def _load_shadow_live_cycle(
     *,
     bundle: LoadedLiveCandidateBundle,
+    mandate: Mandate,
     definition: ShadowLiveCycleDefinition,
+    source_db_path: str,
 ) -> ShadowLiveCycleTrace:
     run_manifest = load_run_manifest(definition.run_manifest_path)
     manual_outcome = load_manual_execution_outcome(
@@ -1144,6 +1192,30 @@ def _load_shadow_live_cycle(
         raise ValueError(
             "Shadow live manual execution outcome execution_date must match the run manifest."
         )
+    stale_market_data_sessions = 0
+    runtime_blocked_entry_assets: list[str] = []
+    runtime_forced_exit_assets: list[str] = []
+    if source_db_path.strip():
+        stale_market_data_sessions = _shadow_live_stale_market_data_sessions(
+            source_db_path=source_db_path,
+            trade_date=run_manifest.trade_date,
+            data_build_date=run_manifest.data_build_date,
+        )
+        runtime_blocked_entry_assets, runtime_forced_exit_assets = (
+            _shadow_live_runtime_st_delist_exposure(
+                source_db_path=source_db_path,
+                trade_date=run_manifest.trade_date,
+                account_state_path=run_manifest.account_state_path,
+                manual_outcome=manual_outcome,
+                mandate=mandate,
+            )
+        )
+    modeled_slippage_bps = _shadow_live_modeled_slippage_bps(
+        manual_outcome=manual_outcome,
+        cost_model=bundle.default_cost_model,
+    )
+    realized_slippage_bps = realized_window.realized_cost.slippage_bps
+    slippage_excess_bps = realized_slippage_bps - modeled_slippage_bps
     return ShadowLiveCycleTrace(
         trade_date=run_manifest.trade_date,
         run_id=run_manifest.run_id,
@@ -1156,6 +1228,16 @@ def _load_shadow_live_cycle(
         exception_count=len(manual_outcome.exception_reasons),
         cash_drift_weight=manual_outcome.cash_drift_weight,
         realized_turnover=realized_window.realized_summary.average_turnover,
+        stale_market_data=(stale_market_data_sessions > 1),
+        stale_market_data_sessions=stale_market_data_sessions,
+        runtime_blocked_entry_assets=runtime_blocked_entry_assets,
+        runtime_forced_exit_assets=runtime_forced_exit_assets,
+        modeled_slippage_bps=modeled_slippage_bps,
+        realized_slippage_bps=realized_slippage_bps,
+        slippage_excess_bps=slippage_excess_bps,
+        slippage_model_underestimated=(
+            slippage_excess_bps > _DEFAULT_SLIPPAGE_UNDERESTIMATION_BPS
+        ),
     )
 
 
@@ -1176,12 +1258,22 @@ def _validate_shadow_live_cycle_order(cycles: list[ShadowLiveCycleTrace]) -> Non
         previous_date = current_date
 
 
-def _shadow_live_summary(cycles: list[ShadowLiveCycleTrace]) -> ShadowLiveJournalSummary:
+def _shadow_live_summary(
+    cycles: list[ShadowLiveCycleTrace],
+    *,
+    audit: EvaluatedMultiYearValidationAudit | None,
+    mandate: Mandate,
+) -> ShadowLiveJournalSummary:
     summary = ShadowLiveJournalSummary(
         cycle_count=len(cycles),
         overlay_state_counts={"normal": 0, "de_risk": 0, "cash_heavier": 0},
+        cash_drift_budget=float(mandate.risk.get("cash_buffer", 0.0) or 0.0),
     )
+    if audit is not None:
+        summary.data_quality_gate_met = audit.summary.data_quality_gate_met
+        summary.strategy_quality_gate_met = audit.summary.strategy_quality_gate_met
     if not cycles:
+        summary.blockers = _shadow_live_blockers(summary)
         return summary
     summary.calendar_month_count = len({cycle.trade_date[:7] for cycle in cycles})
     summary.consecutive_weekly_cycles = _longest_weekly_streak(
@@ -1197,9 +1289,20 @@ def _shadow_live_summary(cycles: list[ShadowLiveCycleTrace]) -> ShadowLiveJourna
             summary.max_cash_drift_weight,
             abs(cycle.cash_drift_weight),
         )
+        if (
+            summary.cash_drift_budget > 0.0
+            and abs(cycle.cash_drift_weight) > summary.cash_drift_budget
+        ):
+            summary.cash_drift_budget_breach_count += 1
         summary.max_realized_turnover = max(
             summary.max_realized_turnover,
             cycle.realized_turnover,
+        )
+        summary.stale_cycle_count += int(cycle.stale_market_data)
+        summary.runtime_blocked_entry_count += len(cycle.runtime_blocked_entry_assets)
+        summary.runtime_forced_exit_count += len(cycle.runtime_forced_exit_assets)
+        summary.slippage_model_underestimated_count += int(
+            cycle.slippage_model_underestimated
         )
     summary.average_cash_drift_weight = sum(
         abs(cycle.cash_drift_weight) for cycle in cycles
@@ -1207,17 +1310,187 @@ def _shadow_live_summary(cycles: list[ShadowLiveCycleTrace]) -> ShadowLiveJourna
     summary.average_realized_turnover = sum(
         cycle.realized_turnover for cycle in cycles
     ) / len(cycles)
+    summary.average_modeled_slippage_bps = sum(
+        cycle.modeled_slippage_bps for cycle in cycles
+    ) / len(cycles)
+    summary.average_realized_slippage_bps = sum(
+        cycle.realized_slippage_bps for cycle in cycles
+    ) / len(cycles)
+    summary.blocked_trade_review_required = summary.blocked_trade_count > 0
+    summary.manual_override_review_required = summary.manual_override_count > 0
+    summary.blockers = _shadow_live_blockers(summary)
+    summary.review_flags = _shadow_live_review_flags(summary)
     summary.shadow_live_gate_met = (
         summary.cycle_count >= 12
         and summary.consecutive_weekly_cycles >= 12
         and summary.calendar_month_count >= 3
+        and not summary.blockers
     )
     summary.probation_preferred_gate_met = (
         summary.cycle_count >= 20
         and summary.consecutive_weekly_cycles >= 20
         and summary.calendar_month_count >= 6
+        and not summary.blockers
+        and not summary.review_flags
     )
     return summary
+
+
+def _shadow_live_blockers(summary: ShadowLiveJournalSummary) -> list[str]:
+    blockers: list[str] = []
+    if not summary.data_quality_gate_met:
+        blockers.append("data_quality_gate")
+    if not summary.strategy_quality_gate_met:
+        blockers.append("strategy_quality_gate")
+    if summary.stale_cycle_count > 0:
+        blockers.append("stale_market_data")
+    if (
+        summary.runtime_blocked_entry_count > 0
+        or summary.runtime_forced_exit_count > 0
+    ):
+        blockers.append("runtime_st_delist_guard")
+    return blockers
+
+
+def _shadow_live_review_flags(summary: ShadowLiveJournalSummary) -> list[str]:
+    review_flags: list[str] = []
+    if summary.blocked_trade_review_required:
+        review_flags.append("blocked_trade_pressure")
+    if summary.manual_override_review_required:
+        review_flags.append("manual_overrides")
+    if summary.cash_drift_budget_breach_count > 0:
+        review_flags.append("cash_drag_above_expectation")
+    if summary.slippage_model_underestimated_count > 0:
+        review_flags.append("slippage_model_underestimated")
+    return review_flags
+
+
+def _shadow_live_modeled_slippage_bps(
+    *,
+    manual_outcome: Any,
+    cost_model: CostModel,
+) -> float:
+    weighted_bps = 0.0
+    total_executed_weight = 0.0
+    for attempt in manual_outcome.attempted_orders:
+        executed_weight = abs(attempt.executed_delta_weight)
+        if executed_weight <= 0.0:
+            continue
+        slippage_bps = 0.0
+        if attempt.action == "buy":
+            slippage_bps = cost_model.buy_slippage_bps
+        elif attempt.action == "sell":
+            slippage_bps = cost_model.sell_slippage_bps
+        weighted_bps += executed_weight * slippage_bps
+        total_executed_weight += executed_weight
+    if total_executed_weight <= 0.0:
+        return 0.0
+    return weighted_bps / total_executed_weight
+
+
+def _shadow_live_stale_market_data_sessions(
+    *,
+    source_db_path: Path | str,
+    trade_date: str,
+    data_build_date: str,
+) -> int:
+    expected_trade_date = _normalize_trade_date(trade_date)
+    reference_trade_date = _normalize_trade_date(data_build_date) if data_build_date else ""
+    date_sql = _iso_date_sql("trade_date")
+    conn = duckdb.connect(str(_resolve_project_path(source_db_path)), read_only=True)
+    try:
+        latest_available_row = conn.execute(
+            f"""
+            SELECT MAX({date_sql})
+            FROM daily_bar_pit
+            WHERE {date_sql} <= ?
+            """,
+            [expected_trade_date],
+        ).fetchone()
+        latest_available_date = (
+            str(latest_available_row[0]) if latest_available_row and latest_available_row[0] else ""
+        )
+        if latest_available_date:
+            if not reference_trade_date or latest_available_date < reference_trade_date:
+                reference_trade_date = latest_available_date
+        if not reference_trade_date:
+            return 2
+        gap_row = conn.execute(
+            f"""
+            SELECT COUNT(*)
+            FROM market_trade_calendar
+            WHERE {_iso_date_sql('trade_date')} > ?
+              AND {_iso_date_sql('trade_date')} <= ?
+            """,
+            [reference_trade_date, expected_trade_date],
+        ).fetchone()
+        return int(gap_row[0]) if gap_row is not None else 0
+    finally:
+        conn.close()
+
+
+def _shadow_live_runtime_st_delist_exposure(
+    *,
+    source_db_path: Path | str,
+    trade_date: str,
+    account_state_path: str,
+    manual_outcome: Any,
+    mandate: Mandate,
+) -> tuple[list[str], list[str]]:
+    exclude_st = bool(mandate.filters.get("exclude_st", False))
+    buy_assets = {
+        attempt.asset_id
+        for attempt in manual_outcome.attempted_orders
+        if attempt.action == "buy" and abs(attempt.requested_delta_weight) > 0.0
+    }
+    held_assets = {
+        holding.asset_id for holding in manual_outcome.post_trade_holdings if holding.weight > 0.0
+    }
+    if account_state_path.strip():
+        account_state = load_account_state_snapshot(account_state_path)
+        held_assets.update(
+            position.asset_id for position in account_state.positions if position.shares > 0.0
+        )
+    assets = sorted(buy_assets | held_assets)
+    if not assets:
+        return [], []
+    placeholders = ", ".join("?" for _ in assets)
+    normalized_trade_date = _normalize_trade_date(trade_date)
+    conn = duckdb.connect(str(_resolve_project_path(source_db_path)), read_only=True)
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT
+                s.security_id,
+                COALESCE(s.current_name, '') AS current_name,
+                {_iso_date_sql('s.delist_date')} AS delist_date,
+                COALESCE(b.is_st, FALSE) AS is_st
+            FROM security_master_ref AS s
+            LEFT JOIN daily_bar_pit AS b
+              ON b.security_id = s.security_id
+             AND {_iso_date_sql('b.trade_date')} = ?
+            WHERE s.security_id IN ({placeholders})
+            """,
+            [normalized_trade_date, *assets],
+        ).fetchall()
+    finally:
+        conn.close()
+    exposure_by_asset = {str(row[0]): row for row in rows}
+    blocked_entries: list[str] = []
+    forced_exits: list[str] = []
+    for asset_id in assets:
+        row = exposure_by_asset.get(asset_id)
+        if row is None:
+            continue
+        current_name = str(row[1] or "")
+        delist_date = str(row[2] or "")
+        is_st = bool(row[3]) or ("ST" in current_name.upper())
+        is_delisted = bool(delist_date) and delist_date <= normalized_trade_date
+        if asset_id in buy_assets and ((exclude_st and is_st) or is_delisted):
+            blocked_entries.append(asset_id)
+        if asset_id in held_assets and ((exclude_st and is_st) or is_delisted):
+            forced_exits.append(asset_id)
+    return sorted(blocked_entries), sorted(forced_exits)
 
 
 def _longest_weekly_streak(trade_dates: list[str]) -> int:
@@ -1452,6 +1725,21 @@ def _optional_float(value: object) -> float | None:
     if value is None:
         return None
     return float(value)
+
+
+def _iso_date_sql(column_name: str) -> str:
+    return f"""
+        CASE
+            WHEN {column_name} IS NULL OR trim(CAST({column_name} AS VARCHAR)) = '' THEN NULL
+            WHEN length(trim(CAST({column_name} AS VARCHAR))) = 8
+                THEN substr(trim(CAST({column_name} AS VARCHAR)), 1, 4)
+                    || '-'
+                    || substr(trim(CAST({column_name} AS VARCHAR)), 5, 2)
+                    || '-'
+                    || substr(trim(CAST({column_name} AS VARCHAR)), 7, 2)
+            ELSE substr(trim(CAST({column_name} AS VARCHAR)), 1, 10)
+        END
+    """
 
 
 def _normalize_trade_date(value: str) -> str:
