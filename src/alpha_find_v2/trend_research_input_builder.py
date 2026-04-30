@@ -20,6 +20,7 @@ from .target_builder import TradeLegState
 
 SUPPORTED_DESCRIPTOR_IDS = {
     "medium_term_relative_strength",
+    "industry_relative_strength",
     "trend_stability",
     "turnover_confirmation",
 }
@@ -117,6 +118,7 @@ class LoadedTrendResearchInputBuildCase:
     weight_cap: float
     holding_horizon_days: int
     min_turnover_cny_mn: float
+    single_industry_name_cap: int
     descriptor_weights: dict[str, float]
     residual_components: list[str] = field(default_factory=list)
     residual_component_snapshot_path: Path | None = None
@@ -256,6 +258,15 @@ def load_trend_research_input_build_case(
         default_cost_model.min_median_daily_turnover_cny_mn,
     )
     descriptor_weights = _descriptor_weights(descriptor_set)
+    if (
+        _requires_industry_labels(descriptor_weights)
+        and definition.industry_label_source != "industry_classification_pit"
+    ):
+        raise ValueError(
+            "Trend research input build case requires "
+            "industry_label_source='industry_classification_pit' when the "
+            "descriptor set requests industry_relative_strength."
+        )
 
     return LoadedTrendResearchInputBuildCase(
         definition=definition,
@@ -270,6 +281,10 @@ def load_trend_research_input_build_case(
         weight_cap=weight_cap,
         holding_horizon_days=target.horizon_days,
         min_turnover_cny_mn=min_turnover_cny_mn,
+        single_industry_name_cap=max(
+            int(sleeve.constraints.get("single_industry_name_cap", 0)),
+            0,
+        ),
         descriptor_weights=descriptor_weights,
         residual_components=list(target.residualization),
         residual_component_snapshot_path=(
@@ -357,7 +372,18 @@ def build_trend_research_observation_input(
             },
         )
         selected_count = loaded_case.holding_count or len(scored)
-        selected = scored[:selected_count]
+        selected = _select_with_industry_cap(
+            scored=scored,
+            industry_by_asset={
+                candidate.security_id: industry_by_observation.get(
+                    (trade_date, candidate.security_id),
+                    "",
+                )
+                for candidate in date_candidates
+            },
+            holding_count=selected_count,
+            single_industry_name_cap=loaded_case.single_industry_name_cap,
+        )
         if not selected:
             continue
         selected_by_date.append((trade_date, selected))
@@ -1348,9 +1374,11 @@ def _score_candidates(
     descriptor_weights: dict[str, float],
     industry_by_asset: dict[str, str] | None = None,
 ) -> list[dict[str, object]]:
+    uses_explicit_industry_relative = _requires_industry_labels(descriptor_weights)
     raw_metrics = {
         candidate.security_id: {
             "medium_term_relative_strength": 0.5 * candidate.ret_short + 0.5 * candidate.ret_long,
+            "industry_relative_strength": 0.5 * candidate.ret_short + 0.5 * candidate.ret_long,
             "trend_stability": (
                 candidate.ret_long / candidate.short_return_vol
                 if candidate.short_return_vol and candidate.short_return_vol > 0.0
@@ -1367,7 +1395,24 @@ def _score_candidates(
             candidate.security_id: float(raw_metrics[candidate.security_id][descriptor_id])
             for candidate in candidates
         }
-        if industry_by_asset and all(industry_by_asset.values()):
+        if (
+            descriptor_id == "industry_relative_strength"
+            and uses_explicit_industry_relative
+        ):
+            if not industry_by_asset or not all(industry_by_asset.values()):
+                raise ValueError(
+                    "industry_relative_strength requires industry labels for every asset."
+                )
+            zscores_by_descriptor[descriptor_id] = group_neutral_zscore_map(
+                values_by_asset=values_by_asset,
+                group_by_asset=industry_by_asset,
+            )
+            continue
+        if (
+            not uses_explicit_industry_relative
+            and industry_by_asset
+            and all(industry_by_asset.values())
+        ):
             zscores_by_descriptor[descriptor_id] = group_neutral_zscore_map(
                 values_by_asset=values_by_asset,
                 group_by_asset=industry_by_asset,
@@ -1399,6 +1444,10 @@ def _turnover_confirmation(candidate: _CandidateRow) -> float:
     return math.log(max(turnover_ratio, 1.0))
 
 
+def _requires_industry_labels(descriptor_weights: dict[str, float]) -> bool:
+    return "industry_relative_strength" in descriptor_weights
+
+
 def _descriptor_weights(descriptor_set) -> dict[str, float]:
     unsupported = [
         component.descriptor_id
@@ -1418,6 +1467,33 @@ def _descriptor_weights(descriptor_set) -> dict[str, float]:
     if not weights:
         raise ValueError("Trend research input builder requires at least one descriptor component.")
     return weights
+
+
+def _select_with_industry_cap(
+    *,
+    scored: list[dict[str, object]],
+    industry_by_asset: dict[str, str],
+    holding_count: int,
+    single_industry_name_cap: int,
+) -> list[dict[str, object]]:
+    if holding_count <= 0:
+        return []
+    if single_industry_name_cap <= 0:
+        return scored[:holding_count]
+
+    selected: list[dict[str, object]] = []
+    counts_by_industry: dict[str, int] = {}
+    for item in scored:
+        candidate = item["candidate"]
+        industry = industry_by_asset.get(candidate.security_id, "").strip()
+        if industry and counts_by_industry.get(industry, 0) >= single_industry_name_cap:
+            continue
+        selected.append(item)
+        if industry:
+            counts_by_industry[industry] = counts_by_industry.get(industry, 0) + 1
+        if len(selected) >= holding_count:
+            break
+    return selected
 
 
 def _zscore_map(values: dict[str, float]) -> dict[str, float]:

@@ -641,6 +641,132 @@ class TrendResearchInputBuilderTest(unittest.TestCase):
         self.assertLess(ranked_ids.index("BANK_LEADER"), ranked_ids.index("TECH_LAGGARD"))
         self.assertLess(ranked_ids.index("TECH_LEADER"), ranked_ids.index("BANK_LAGGARD"))
 
+    def test_score_candidates_can_execute_industry_relative_strength_descriptor(self) -> None:
+        from alpha_find_v2.trend_research_input_builder import (
+            _CandidateRow,
+            _score_candidates,
+        )
+
+        common = {
+            "trade_date": "20260406",
+            "list_date": "20200102",
+            "entry_open": 10.0,
+            "exit_open": 11.0,
+            "median_turnover_cny": 200_000_000.0,
+            "turnover_baseline_cny": 100_000_000.0,
+            "entry_suspended": False,
+            "exit_suspended": False,
+            "entry_liquidity_pass": True,
+            "exit_liquidity_pass": True,
+            "entry_limit_locked": False,
+            "exit_limit_locked": False,
+            "short_return_vol": 0.02,
+        }
+        scored = _score_candidates(
+            candidates=[
+                _CandidateRow(
+                    security_id="BANK_LEADER",
+                    ret_short=0.05,
+                    ret_long=0.05,
+                    **common,
+                ),
+                _CandidateRow(
+                    security_id="BANK_LAGGARD",
+                    ret_short=0.04,
+                    ret_long=0.04,
+                    **common,
+                ),
+                _CandidateRow(
+                    security_id="TECH_LEADER",
+                    ret_short=0.50,
+                    ret_long=0.50,
+                    **common,
+                ),
+                _CandidateRow(
+                    security_id="TECH_LAGGARD",
+                    ret_short=0.49,
+                    ret_long=0.49,
+                    **common,
+                ),
+            ],
+            descriptor_weights={"industry_relative_strength": 1.0},
+            industry_by_asset={
+                "BANK_LEADER": "bank",
+                "BANK_LAGGARD": "bank",
+                "TECH_LEADER": "tech",
+                "TECH_LAGGARD": "tech",
+            },
+        )
+
+        ranked_ids = [item["candidate"].security_id for item in scored]
+        self.assertLess(ranked_ids.index("BANK_LEADER"), ranked_ids.index("BANK_LAGGARD"))
+        self.assertLess(ranked_ids.index("TECH_LEADER"), ranked_ids.index("TECH_LAGGARD"))
+
+    def test_select_with_industry_cap_limits_selected_names_per_industry(self) -> None:
+        from alpha_find_v2.trend_research_input_builder import (
+            _CandidateRow,
+            _select_with_industry_cap,
+        )
+
+        common = {
+            "trade_date": "20260406",
+            "list_date": "20200102",
+            "entry_open": 10.0,
+            "exit_open": 11.0,
+            "median_turnover_cny": 200_000_000.0,
+            "turnover_baseline_cny": 100_000_000.0,
+            "entry_suspended": False,
+            "exit_suspended": False,
+            "entry_liquidity_pass": True,
+            "exit_liquidity_pass": True,
+            "entry_limit_locked": False,
+            "exit_limit_locked": False,
+            "short_return_vol": 0.02,
+        }
+        selected = _select_with_industry_cap(
+            scored=[
+                {
+                    "candidate": _CandidateRow(
+                        security_id="BANK_1",
+                        ret_short=0.10,
+                        ret_long=0.10,
+                        **common,
+                    ),
+                    "score": 4.0,
+                },
+                {
+                    "candidate": _CandidateRow(
+                        security_id="BANK_2",
+                        ret_short=0.09,
+                        ret_long=0.09,
+                        **common,
+                    ),
+                    "score": 3.0,
+                },
+                {
+                    "candidate": _CandidateRow(
+                        security_id="TECH_1",
+                        ret_short=0.08,
+                        ret_long=0.08,
+                        **common,
+                    ),
+                    "score": 2.0,
+                },
+            ],
+            industry_by_asset={
+                "BANK_1": "bank",
+                "BANK_2": "bank",
+                "TECH_1": "tech",
+            },
+            holding_count=2,
+            single_industry_name_cap=1,
+        )
+
+        self.assertEqual(
+            [item["candidate"].security_id for item in selected],
+            ["BANK_1", "TECH_1"],
+        )
+
     def test_builder_emits_weekly_trend_observation_input_from_duckdb(self) -> None:
         from alpha_find_v2.trend_research_input_builder import (
             build_trend_research_observation_input,
@@ -712,6 +838,51 @@ class TrendResearchInputBuilderTest(unittest.TestCase):
             roundtrip = load_sleeve_research_observation_input(output_path)
             self.assertEqual([step.trade_date for step in roundtrip.steps], [first_signal, second_signal])
             self.assertEqual([record.asset_id for record in roundtrip.steps[0].records], ["600001.SH", "600002.SH"])
+
+    def test_builder_requires_industry_labels_for_leader_pullback_descriptor_set(self) -> None:
+        from alpha_find_v2.trend_research_input_builder import (
+            load_trend_research_input_build_case,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            source_db = temp_root / "research_source.duckdb"
+            case_path = temp_root / "build_case.toml"
+            trade_dates = _trading_days(date(2024, 1, 2), 95)
+            first_signal = trade_dates[60]
+            _create_research_source_db(source_db, trade_dates)
+
+            case_path.write_text(
+                "\n".join(
+                    [
+                        'schema_version = 1',
+                        'artifact_type = "trend_research_input_build_case"',
+                        'case_id = "leader_pullback_missing_industry_case"',
+                        'description = "Fail closed when industry binding is required."',
+                        'sleeve_path = "config/sleeves/leader_pullback_continuation_v1.toml"',
+                        f'source_db_path = "{source_db}"',
+                        f'output_path = "{temp_root / "trend_input.json"}"',
+                        f'start_date = "{first_signal}"',
+                        f'end_date = "{trade_dates[69]}"',
+                        'min_listing_days = 120',
+                        'lookback_days = 60',
+                        'short_window_days = 20',
+                        'turnover_window_days = 20',
+                        'rebalance_stride = 10',
+                        'industry_label_source = "omit"',
+                        'limit_lock_mode = "disabled"',
+                        'residualization_mode = "non_residual_target"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "requires industry_label_source='industry_classification_pit'",
+            ):
+                load_trend_research_input_build_case(case_path)
 
     def test_builder_excludes_candidate_crossing_exception_ledger_window(self) -> None:
         from alpha_find_v2.trend_research_input_builder import (
