@@ -8,6 +8,28 @@ from typing import Any
 
 import pandas as pd
 
+EVENT_OUTPUT_COLUMNS = [
+    "variant_name",
+    "confirm_days",
+    "security_id",
+    "signal_date",
+    "start_high",
+    "start_date",
+    "trough_date",
+    "buy_date",
+    "candidate_entry_date",
+    "confirmation_pass",
+    "entry_open",
+    "close_ret30",
+    "max_ret30",
+    "min_ret30",
+    "up10",
+    "up20",
+    "up30",
+    "loss10",
+    "first_hit",
+]
+
 
 def _to_frame(rows: pd.DataFrame | list[dict[str, Any]]) -> pd.DataFrame:
     if isinstance(rows, pd.DataFrame):
@@ -142,7 +164,7 @@ def build_confirmation_variant(
         row.update(stats)
         rows.append(row)
 
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=EVENT_OUTPUT_COLUMNS)
 
 
 def summarize_variant_years(variant_rows: pd.DataFrame | list[dict[str, Any]]) -> tuple[pd.DataFrame, pd.DataFrame]:

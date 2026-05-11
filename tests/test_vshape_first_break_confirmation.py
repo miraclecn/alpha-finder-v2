@@ -205,6 +205,9 @@ class VShapeFirstBreakConfirmationIntegrationTest(unittest.TestCase):
     def _write_events_csv(self, path: Path) -> None:
         _events().to_csv(path, index=False)
 
+    def _write_empty_events_csv(self, path: Path) -> None:
+        _events().head(0).to_csv(path, index=False)
+
     def test_run_study_writes_summary_density_events_and_report(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             base = Path(tmp_dir)
@@ -276,6 +279,80 @@ class VShapeFirstBreakConfirmationIntegrationTest(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             self.assertTrue(summary_csv.exists())
+
+    def test_run_study_handles_header_only_events_csv(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            source_db = base / "source.duckdb"
+            events_csv = base / "events_empty.csv"
+            summary_csv = base / "summary.csv"
+            density_csv = base / "density.csv"
+            events_output_csv = base / "events_output.csv"
+            report_markdown = base / "report.md"
+
+            self._write_source_db(source_db)
+            self._write_empty_events_csv(events_csv)
+
+            outputs = run_first_break_confirmation_study(
+                events_csv_path=events_csv,
+                source_db_path=source_db,
+                summary_csv_path=summary_csv,
+                density_csv_path=density_csv,
+                events_output_csv_path=events_output_csv,
+                report_markdown_path=report_markdown,
+            )
+
+            self.assertTrue(summary_csv.exists())
+            self.assertTrue(density_csv.exists())
+            self.assertTrue(events_output_csv.exists())
+            self.assertTrue(report_markdown.exists())
+
+            self.assertTrue(outputs["summary"].empty)
+            self.assertTrue(outputs["density"].empty)
+            self.assertTrue(outputs["events"].empty)
+
+            self.assertEqual(
+                outputs["summary"].columns.tolist(),
+                ["variant_name", "year", "candidate_rows", "events", "confirmation_pass_rate"],
+            )
+            self.assertEqual(
+                outputs["density"].columns.tolist(),
+                ["variant_name", "year", "events", "signal_days", "avg_per_day"],
+            )
+            self.assertEqual(
+                outputs["events"].columns.tolist(),
+                [
+                    "variant_name",
+                    "confirm_days",
+                    "security_id",
+                    "signal_date",
+                    "start_high",
+                    "start_date",
+                    "trough_date",
+                    "buy_date",
+                    "candidate_entry_date",
+                    "confirmation_pass",
+                    "entry_open",
+                    "close_ret30",
+                    "max_ret30",
+                    "min_ret30",
+                    "up10",
+                    "up20",
+                    "up30",
+                    "loss10",
+                    "first_hit",
+                ],
+            )
+
+            summary = pd.read_csv(summary_csv)
+            density = pd.read_csv(density_csv)
+            events = pd.read_csv(events_output_csv)
+            self.assertTrue(summary.empty)
+            self.assertTrue(density.empty)
+            self.assertTrue(events.empty)
+            self.assertEqual(summary.columns.tolist(), outputs["summary"].columns.tolist())
+            self.assertEqual(density.columns.tolist(), outputs["density"].columns.tolist())
+            self.assertEqual(events.columns.tolist(), outputs["events"].columns.tolist())
 
 
 if __name__ == "__main__":
