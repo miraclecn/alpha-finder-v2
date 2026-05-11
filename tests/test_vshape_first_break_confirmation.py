@@ -89,6 +89,7 @@ class VshapeFirstBreakConfirmationTest(unittest.TestCase):
         self.assertEqual(confirm_2d.loc[0, "candidate_entry_date"], "20240105")
         self.assertEqual(confirm_3d.loc[0, "candidate_entry_date"], "20240108")
         self.assertEqual(confirm_2d.loc[0, "entry_open"], 10.5)
+        self.assertEqual(confirm_2d.loc[0, "first_hit"], "unresolved")
         self.assertTrue(math.isnan(confirm_3d.loc[0, "entry_open"]))
 
     def test_summarize_variant_years_uses_candidate_rows_as_denominator(self) -> None:
@@ -111,6 +112,43 @@ class VshapeFirstBreakConfirmationTest(unittest.TestCase):
         summary_2d_row = summary_2d.loc[summary_2d["year"] == 2024].iloc[0]
         summary_3d_row = summary_3d.loc[summary_3d["year"] == 2024].iloc[0]
         density_2d_row = density_2d.loc[density_2d["year"] == 2024].iloc[0]
+
+        self.assertEqual(summary_2d_row["confirmation_pass_rate"], 0.5)
+        self.assertEqual(summary_2d_row["events"], 1)
+        self.assertEqual(summary_3d_row["confirmation_pass_rate"], 0.0)
+        self.assertEqual(summary_3d_row["events"], 0)
+        self.assertEqual(density_2d_row["signal_days"], 1)
+        self.assertEqual(density_2d_row["avg_per_day"], 1.0)
+
+    def test_summarize_variant_years_handles_mixed_variant_rows(self) -> None:
+        confirm_2d = build_confirmation_variant(
+            _events(),
+            _bars(),
+            variant_name="confirm_2d",
+            confirm_days=2,
+        )
+        confirm_3d = build_confirmation_variant(
+            _events(),
+            _bars(),
+            variant_name="confirm_3d",
+            confirm_days=3,
+        )
+        mixed = pd.concat([confirm_2d, confirm_3d], ignore_index=True)
+
+        summary, density = summarize_variant_years(mixed)
+
+        self.assertEqual(len(summary), 2)
+        self.assertEqual(len(density), 2)
+
+        summary_2d_row = summary.loc[
+            (summary["variant_name"] == "confirm_2d") & (summary["year"] == 2024)
+        ].iloc[0]
+        summary_3d_row = summary.loc[
+            (summary["variant_name"] == "confirm_3d") & (summary["year"] == 2024)
+        ].iloc[0]
+        density_2d_row = density.loc[
+            (density["variant_name"] == "confirm_2d") & (density["year"] == 2024)
+        ].iloc[0]
 
         self.assertEqual(summary_2d_row["confirmation_pass_rate"], 0.5)
         self.assertEqual(summary_2d_row["events"], 1)

@@ -158,20 +158,19 @@ def summarize_variant_years(variant_rows: pd.DataFrame | list[dict[str, Any]]) -
             pd.DataFrame(columns=["variant_name", "year", "events", "signal_days", "avg_per_day"]),
         )
 
-    variant_name = str(frame["variant_name"].iloc[0])
     working = frame.copy()
     working["signal_date"] = working["signal_date"].astype(str)
     working["year"] = working["signal_date"].str.slice(0, 4).astype(int)
-    candidate_mask = working["candidate_entry_date"].notna() & (working["candidate_entry_date"] != "")
-    pass_mask = working["confirmation_pass"].fillna(False).astype(bool)
+    working["candidate_row"] = working["candidate_entry_date"].notna() & (working["candidate_entry_date"] != "")
+    working["pass_row"] = working["confirmation_pass"].fillna(False).astype(bool)
 
     summary_rows: list[dict[str, Any]] = []
     density_rows: list[dict[str, Any]] = []
 
-    for year in sorted(working["year"].unique()):
-        year_mask = working["year"] == year
-        year_candidates = int((candidate_mask & year_mask).sum())
-        year_pass_events = int((candidate_mask & pass_mask & year_mask).sum())
+    grouped = working.groupby(["variant_name", "year"], sort=True, dropna=False)
+    for (variant_name, year), group in grouped:
+        year_candidates = int(group["candidate_row"].sum())
+        year_pass_events = int((group["candidate_row"] & group["pass_row"]).sum())
         pass_rate = 0.0
         if year_candidates > 0:
             pass_rate = year_pass_events / year_candidates
@@ -186,7 +185,7 @@ def summarize_variant_years(variant_rows: pd.DataFrame | list[dict[str, Any]]) -
             }
         )
 
-        passed = working.loc[candidate_mask & pass_mask & year_mask]
+        passed = group.loc[group["candidate_row"] & group["pass_row"]]
         signal_days = int(passed["signal_date"].nunique())
         avg_per_day = 0.0
         if signal_days > 0:
