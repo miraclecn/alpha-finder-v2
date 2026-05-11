@@ -1,11 +1,11 @@
 # V Shape First Break Confirmation Study - 2026-05-12
 
-## Object
-- Source events: `/tmp/vshape_first_break_events.csv`
-- Source DB: `output/research_source.duckdb`
-- Variants: `baseline_first_break`, `confirm_2d`, `confirm_3d`
+## Inputs
+- events_csv: `/tmp/vshape_first_break_events.csv`
+- source_db: `output/research_source.duckdb`
 
 ## Summary
+- Year basis: `signal_date` (event-origin year).
 | variant_name | year | candidate_rows | events | confirmation_pass_rate |
 | --- | --- | --- | --- | --- |
 | baseline_first_break | 2023 | 290 | 290 | 1 |
@@ -19,20 +19,23 @@
 | confirm_3d | 2025 | 1282 | 413 | 0.322153 |
 
 ## Signal Density
+- Year/day basis: `candidate_entry_date` (actual candidate entry timing).
+- `signal_days` counts unique candidate entry dates among passed rows only.
 | variant_name | year | events | signal_days | avg_per_day |
 | --- | --- | --- | --- | --- |
-| baseline_first_break | 2023 | 290 | 116 | 2.5 |
-| baseline_first_break | 2024 | 2491 | 151 | 16.4967 |
-| baseline_first_break | 2025 | 1282 | 151 | 8.49007 |
-| confirm_2d | 2023 | 88 | 63 | 1.39683 |
-| confirm_2d | 2024 | 655 | 99 | 6.61616 |
-| confirm_2d | 2025 | 467 | 94 | 4.96809 |
-| confirm_3d | 2023 | 70 | 54 | 1.2963 |
-| confirm_3d | 2024 | 530 | 90 | 5.88889 |
-| confirm_3d | 2025 | 413 | 91 | 4.53846 |
+| baseline_first_break | 2023 | 289 | 115 | 2.51304 |
+| baseline_first_break | 2024 | 2490 | 151 | 16.4901 |
+| baseline_first_break | 2025 | 1284 | 153 | 8.39216 |
+| confirm_2d | 2023 | 85 | 61 | 1.39344 |
+| confirm_2d | 2024 | 656 | 99 | 6.62626 |
+| confirm_2d | 2025 | 469 | 97 | 4.83505 |
+| confirm_3d | 2023 | 67 | 52 | 1.28846 |
+| confirm_3d | 2024 | 532 | 91 | 5.84615 |
+| confirm_3d | 2025 | 414 | 92 | 4.5 |
+| confirm_3d | 2026 | 0 | 0 | 0 |
 
 ## Judgment
-- `confirm_2d` does not improve the 30-day distribution enough to justify sample loss: retention is 29.78% of baseline, `up10` improves (62.89% vs 58.75%), but mean/median `close_ret30` are slightly worse (`0.005807` vs `0.006144`, `-0.034557` vs `-0.025670`) and `loss10` is higher (`0.512397` vs `0.506030`).
-- `confirm_3d` does not improve the 30-day distribution enough to justify sample loss: retention is 24.93% of baseline and mean/median `close_ret30` are worse (`0.003939` vs `0.006144`, `-0.035156` vs `-0.025670`) with higher `loss10`.
-- No delayed-confirmation variant should advance to portfolio-level testing in this cycle.
-- Because both variants fail the risk/reward tradeoff at event level, this experiment should stop at event-level evaluation.
+- `confirm_2d` still does not justify promotion: retained sample is `1210 / 4063 = 29.78%` of baseline, `up10` improves (`62.89%` vs `58.75%`), but 30-day terminal and downside profile are weaker (`mean close_ret30 0.005807` vs `0.006144`, median `-0.034557` vs `-0.025670`, `loss10 51.24%` vs `50.60%`).
+- `confirm_3d` is weaker than `confirm_2d`: retained sample is `24.93%` of baseline with lower terminal return (`mean close_ret30 0.003939`, median `-0.035156`) and higher downside hit rate (`loss10 53.50%`).
+- Entry-date density correction changes calendar allocation (for example `confirm_3d` now has a `2026` density bucket with `0` passed events), but the corrected density still shows material event loss without compensating distribution improvement.
+- Decision for this cycle remains unchanged: keep delayed-confirmation variants at event-level research only and do not advance either variant to portfolio-level testing.

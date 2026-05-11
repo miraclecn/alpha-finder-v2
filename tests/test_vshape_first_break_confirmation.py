@@ -162,6 +162,53 @@ class VshapeFirstBreakConfirmationTest(unittest.TestCase):
         self.assertEqual(density_2d_row["signal_days"], 1)
         self.assertEqual(density_2d_row["avg_per_day"], 1.0)
 
+    def test_summarize_variant_years_density_uses_candidate_entry_date_basis(self) -> None:
+        rows = pd.DataFrame(
+            [
+                {
+                    "variant_name": "confirm_2d",
+                    "signal_date": "20241230",
+                    "candidate_entry_date": "20250102",
+                    "confirmation_pass": True,
+                },
+                {
+                    "variant_name": "confirm_2d",
+                    "signal_date": "20241231",
+                    "candidate_entry_date": "20250102",
+                    "confirmation_pass": True,
+                },
+                {
+                    "variant_name": "confirm_2d",
+                    "signal_date": "20241215",
+                    "candidate_entry_date": "20241220",
+                    "confirmation_pass": True,
+                },
+                {
+                    "variant_name": "confirm_2d",
+                    "signal_date": "20241216",
+                    "candidate_entry_date": "20241220",
+                    "confirmation_pass": False,
+                },
+            ]
+        )
+
+        summary, density = summarize_variant_years(rows)
+
+        summary_row = summary.loc[(summary["variant_name"] == "confirm_2d") & (summary["year"] == 2024)].iloc[0]
+        self.assertEqual(summary_row["candidate_rows"], 4)
+        self.assertEqual(summary_row["events"], 3)
+
+        self.assertEqual(set(density["year"].tolist()), {2024, 2025})
+        density_2024 = density.loc[(density["variant_name"] == "confirm_2d") & (density["year"] == 2024)].iloc[0]
+        density_2025 = density.loc[(density["variant_name"] == "confirm_2d") & (density["year"] == 2025)].iloc[0]
+
+        self.assertEqual(density_2024["events"], 1)
+        self.assertEqual(density_2024["signal_days"], 1)
+        self.assertEqual(density_2024["avg_per_day"], 1.0)
+        self.assertEqual(density_2025["events"], 2)
+        self.assertEqual(density_2025["signal_days"], 1)
+        self.assertEqual(density_2025["avg_per_day"], 2.0)
+
 
 class VShapeFirstBreakConfirmationIntegrationTest(unittest.TestCase):
     def _write_source_db(self, path: Path) -> None:
@@ -246,6 +293,7 @@ class VShapeFirstBreakConfirmationIntegrationTest(unittest.TestCase):
             markdown = report_markdown.read_text(encoding="utf-8")
             self.assertIn("# V Shape First Break Confirmation Study - 2026-05-12", markdown)
             self.assertIn("confirm_2d", markdown)
+            self.assertIn("Judgment must be curated manually after reviewing full distribution metrics.", markdown)
 
     def test_main_accepts_file_paths_and_exits_cleanly(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

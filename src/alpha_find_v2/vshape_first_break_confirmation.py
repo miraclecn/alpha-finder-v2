@@ -184,16 +184,21 @@ def summarize_variant_years(variant_rows: pd.DataFrame | list[dict[str, Any]]) -
         )
 
     working = frame.copy()
+    # Summary remains on signal_date (event origin); density is intentionally computed on candidate_entry_date (entry timing).
     working["signal_date"] = working["signal_date"].astype(str)
-    working["year"] = working["signal_date"].str.slice(0, 4).astype(int)
-    working["candidate_row"] = working["candidate_entry_date"].notna() & (working["candidate_entry_date"] != "")
+    working["summary_year"] = working["signal_date"].str.slice(0, 4).astype(int)
+    working["candidate_entry_date_basis"] = (
+        working["candidate_entry_date"].where(working["candidate_entry_date"].notna(), "").astype(str)
+    )
+    working["candidate_row"] = working["candidate_entry_date_basis"] != ""
+    working["density_year"] = pd.to_numeric(working["candidate_entry_date_basis"].str.slice(0, 4), errors="coerce")
     working["pass_row"] = working["confirmation_pass"].fillna(False).astype(bool)
 
     summary_rows: list[dict[str, Any]] = []
     density_rows: list[dict[str, Any]] = []
 
-    grouped = working.groupby(["variant_name", "year"], sort=True, dropna=False)
-    for (variant_name, year), group in grouped:
+    summary_grouped = working.groupby(["variant_name", "summary_year"], sort=True, dropna=False)
+    for (variant_name, year), group in summary_grouped:
         year_candidates = int(group["candidate_row"].sum())
         year_pass_events = int((group["candidate_row"] & group["pass_row"]).sum())
         pass_rate = 0.0
@@ -210,8 +215,12 @@ def summarize_variant_years(variant_rows: pd.DataFrame | list[dict[str, Any]]) -
             }
         )
 
-        passed = group.loc[group["candidate_row"] & group["pass_row"]]
-        signal_days = int(passed["signal_date"].nunique())
+    density_basis = working.loc[working["candidate_row"] & working["density_year"].notna()].copy()
+    density_grouped = density_basis.groupby(["variant_name", "density_year"], sort=True, dropna=False)
+    for (variant_name, year), group in density_grouped:
+        passed = group.loc[group["pass_row"]]
+        year_pass_events = int(len(passed))
+        signal_days = int(passed["candidate_entry_date_basis"].nunique())
         avg_per_day = 0.0
         if signal_days > 0:
             avg_per_day = year_pass_events / signal_days
@@ -327,28 +336,25 @@ def write_markdown_report(
         f"- source_db: `{source_db_path}`",
         "",
         "## Summary",
+        "- Year basis: `signal_date` (event-origin year).",
         _markdown_table(summary),
         "",
         "## Signal Density",
+        "- Year/day basis: `candidate_entry_date` (actual candidate entry timing).",
+        "- `signal_days` counts unique candidate entry dates among passed rows only.",
         _markdown_table(density),
         "",
         "## Judgment",
     ]
 
+    lines.extend(
+        [
+            "- Judgment must be curated manually after reviewing full distribution metrics.",
+            "- Do not issue a recommendation from `confirmation_pass_rate` alone.",
+        ]
+    )
     if summary.empty:
-        lines.append("- No rows available for judgment.")
-    else:
-        ranked = (
-            summary.groupby("variant_name", as_index=False)["confirmation_pass_rate"]
-            .mean()
-            .sort_values(["confirmation_pass_rate", "variant_name"], ascending=[False, True])
-            .reset_index(drop=True)
-        )
-        best = ranked.iloc[0]
-        lines.append(
-            "- Best average confirmation pass rate: "
-            f"`{best['variant_name']}` at {float(best['confirmation_pass_rate']):.2%}."
-        )
+        lines.append("- No rows available in this run; refresh inputs before curation.")
 
     report_markdown_path.parent.mkdir(parents=True, exist_ok=True)
     report_markdown_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
