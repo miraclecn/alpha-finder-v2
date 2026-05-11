@@ -32,8 +32,8 @@ def _compute_first_hit(window: pd.DataFrame, entry_open: float) -> str:
     first_dn_idx: int | None = None
 
     for idx, row in window.reset_index(drop=True).iterrows():
-        up_hit = float(row["high"]) >= up10_level
-        dn_hit = float(row["low"]) <= dn10_level
+        up_hit = float(row["high_adj"]) >= up10_level
+        dn_hit = float(row["low_adj"]) <= dn10_level
         if up_hit and dn_hit:
             return "both_same_day"
         if up_hit and first_up_idx is None:
@@ -62,11 +62,11 @@ def _forward_stats(bars: pd.DataFrame, entry_index: int, entry_open: float) -> d
     close_index = entry_index + 30
     close_ret30 = float("nan")
     if close_index < len(bars):
-        close30 = float(bars.iloc[close_index]["close"])
+        close30 = float(bars.iloc[close_index]["close_adj"])
         close_ret30 = (close30 - entry_open) / entry_open
 
-    max_ret30 = (float(window["high"].max()) - entry_open) / entry_open
-    min_ret30 = (float(window["low"].min()) - entry_open) / entry_open
+    max_ret30 = (float(window["high_adj"].max()) - entry_open) / entry_open
+    min_ret30 = (float(window["low_adj"].min()) - entry_open) / entry_open
 
     return {
         "close_ret30": close_ret30,
@@ -117,10 +117,10 @@ def build_confirmation_variant(
                 if confirm_days == 0:
                     confirmation_pass = candidate_entry_date is not None
                 elif candidate_entry_date is not None and len(observation) == confirm_days:
-                    confirmation_pass = bool((observation["low"] > start_high).all())
+                    confirmation_pass = bool((observation["low_adj"] > start_high).all())
 
                 if confirmation_pass and candidate_entry_date is not None:
-                    entry_open = float(bars.iloc[candidate_index]["open"])
+                    entry_open = float(bars.iloc[candidate_index]["open_adj"])
                     stats = _forward_stats(bars, candidate_index, entry_open)
 
         row = {

@@ -15,21 +15,21 @@ def _bars() -> dict[str, pd.DataFrame]:
     return {
         "AAA.SZ": pd.DataFrame(
             [
-                {"trade_date": "20240102", "open": 10.0, "high": 10.2, "low": 9.8, "close": 10.0},
-                {"trade_date": "20240103", "open": 10.2, "high": 10.4, "low": 10.2, "close": 10.3},
-                {"trade_date": "20240104", "open": 10.3, "high": 10.5, "low": 10.1, "close": 10.4},
-                {"trade_date": "20240105", "open": 10.5, "high": 10.6, "low": 9.9, "close": 10.2},
-                {"trade_date": "20240108", "open": 10.4, "high": 10.6, "low": 10.2, "close": 10.5},
-                {"trade_date": "20240109", "open": 10.6, "high": 10.8, "low": 10.4, "close": 10.7},
+                {"trade_date": "20240102", "open_adj": 10.0, "high_adj": 10.2, "low_adj": 9.8, "close_adj": 10.0},
+                {"trade_date": "20240103", "open_adj": 10.2, "high_adj": 10.4, "low_adj": 10.2, "close_adj": 10.3},
+                {"trade_date": "20240104", "open_adj": 10.3, "high_adj": 10.5, "low_adj": 10.1, "close_adj": 10.4},
+                {"trade_date": "20240105", "open_adj": 10.5, "high_adj": 10.6, "low_adj": 9.9, "close_adj": 10.2},
+                {"trade_date": "20240108", "open_adj": 10.4, "high_adj": 10.6, "low_adj": 10.2, "close_adj": 10.5},
+                {"trade_date": "20240109", "open_adj": 10.6, "high_adj": 10.8, "low_adj": 10.4, "close_adj": 10.7},
             ]
         ),
         "BBB.SZ": pd.DataFrame(
             [
-                {"trade_date": "20240102", "open": 20.0, "high": 20.2, "low": 19.8, "close": 20.0},
-                {"trade_date": "20240103", "open": 20.1, "high": 20.2, "low": 19.9, "close": 20.0},
-                {"trade_date": "20240104", "open": 20.2, "high": 20.3, "low": 20.0, "close": 20.1},
-                {"trade_date": "20240105", "open": 20.3, "high": 20.4, "low": 20.1, "close": 20.2},
-                {"trade_date": "20240108", "open": 20.4, "high": 20.5, "low": 20.2, "close": 20.3},
+                {"trade_date": "20240102", "open_adj": 20.0, "high_adj": 20.2, "low_adj": 19.8, "close_adj": 20.0},
+                {"trade_date": "20240103", "open_adj": 20.1, "high_adj": 20.2, "low_adj": 19.9, "close_adj": 20.0},
+                {"trade_date": "20240104", "open_adj": 20.2, "high_adj": 20.3, "low_adj": 20.0, "close_adj": 20.1},
+                {"trade_date": "20240105", "open_adj": 20.3, "high_adj": 20.4, "low_adj": 20.1, "close_adj": 20.2},
+                {"trade_date": "20240108", "open_adj": 20.4, "high_adj": 20.5, "low_adj": 20.2, "close_adj": 20.3},
             ]
         ),
     }
