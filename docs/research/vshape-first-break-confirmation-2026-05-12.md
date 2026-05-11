@@ -32,7 +32,7 @@
 | confirm_3d | 2025 | 413 | 91 | 4.53846 |
 
 ## Judgment
-- `confirm_2d` does not improve the 30-day distribution enough to justify sample loss: retention is 29.78% of baseline, mean/median `close_ret30` are slightly worse (`0.005807` vs `0.006144`, `-0.034557` vs `-0.025670`), and `loss10` is higher.
-- `confirm_3d` does not improve the 30-day distribution enough to justify sample loss: retention is 24.96% of baseline and mean/median `close_ret30` are worse (`0.003939` vs `0.006144`, `-0.035156` vs `-0.025670`) with higher `loss10`.
+- `confirm_2d` does not improve the 30-day distribution enough to justify sample loss: retention is 29.78% of baseline, `up10` improves (62.89% vs 58.75%), but mean/median `close_ret30` are slightly worse (`0.005807` vs `0.006144`, `-0.034557` vs `-0.025670`) and `loss10` is higher (`0.512397` vs `0.506030`).
+- `confirm_3d` does not improve the 30-day distribution enough to justify sample loss: retention is 24.93% of baseline and mean/median `close_ret30` are worse (`0.003939` vs `0.006144`, `-0.035156` vs `-0.025670`) with higher `loss10`.
 - No delayed-confirmation variant should advance to portfolio-level testing in this cycle.
 - Because both variants fail the risk/reward tradeoff at event level, this experiment should stop at event-level evaluation.
