@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import math
+import tempfile
 import unittest
+from pathlib import Path
 
+import duckdb
 import pandas as pd
 
 from alpha_find_v2.vshape_first_break_confirmation import (
     build_confirmation_variant,
+    main,
+    run_first_break_confirmation_study,
     summarize_variant_years,
 )
 
@@ -156,6 +161,121 @@ class VshapeFirstBreakConfirmationTest(unittest.TestCase):
         self.assertEqual(summary_3d_row["events"], 0)
         self.assertEqual(density_2d_row["signal_days"], 1)
         self.assertEqual(density_2d_row["avg_per_day"], 1.0)
+
+
+class VShapeFirstBreakConfirmationIntegrationTest(unittest.TestCase):
+    def _write_source_db(self, path: Path) -> None:
+        conn = duckdb.connect(str(path))
+        try:
+            conn.execute(
+                """
+                CREATE TABLE daily_bar_pit (
+                    security_id VARCHAR,
+                    trade_date VARCHAR,
+                    exchange VARCHAR,
+                    board VARCHAR,
+                    is_st BOOLEAN,
+                    open_adj DOUBLE,
+                    high_adj DOUBLE,
+                    low_adj DOUBLE,
+                    close_adj DOUBLE
+                )
+                """
+            )
+            rows: list[tuple[str, str, str, str, bool, float, float, float, float]] = []
+            for security_id, bars in _bars().items():
+                for row in bars.to_dict(orient="records"):
+                    rows.append(
+                        (
+                            security_id,
+                            str(row["trade_date"]),
+                            "SZ",
+                            "main_board",
+                            False,
+                            float(row["open_adj"]),
+                            float(row["high_adj"]),
+                            float(row["low_adj"]),
+                            float(row["close_adj"]),
+                        )
+                    )
+            conn.executemany("INSERT INTO daily_bar_pit VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+        finally:
+            conn.close()
+
+    def _write_events_csv(self, path: Path) -> None:
+        _events().to_csv(path, index=False)
+
+    def test_run_study_writes_summary_density_events_and_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            source_db = base / "source.duckdb"
+            events_csv = base / "events.csv"
+            summary_csv = base / "summary.csv"
+            density_csv = base / "density.csv"
+            events_output_csv = base / "events_output.csv"
+            report_markdown = base / "report.md"
+
+            self._write_source_db(source_db)
+            self._write_events_csv(events_csv)
+
+            outputs = run_first_break_confirmation_study(
+                events_csv_path=events_csv,
+                source_db_path=source_db,
+                summary_csv_path=summary_csv,
+                density_csv_path=density_csv,
+                events_output_csv_path=events_output_csv,
+                report_markdown_path=report_markdown,
+            )
+
+            self.assertEqual(set(outputs.keys()), {"summary", "density", "events"})
+            self.assertTrue(summary_csv.exists())
+            self.assertTrue(density_csv.exists())
+            self.assertTrue(events_output_csv.exists())
+            self.assertTrue(report_markdown.exists())
+
+            summary = pd.read_csv(summary_csv)
+            self.assertEqual(
+                set(summary["variant_name"].tolist()),
+                {"baseline_first_break", "confirm_2d", "confirm_3d"},
+            )
+            self.assertIn("confirmation_pass_rate", summary.columns)
+
+            markdown = report_markdown.read_text(encoding="utf-8")
+            self.assertIn("# V Shape First Break Confirmation Study - 2026-05-12", markdown)
+            self.assertIn("confirm_2d", markdown)
+
+    def test_main_accepts_file_paths_and_exits_cleanly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            source_db = base / "source.duckdb"
+            events_csv = base / "events.csv"
+            summary_csv = base / "summary.csv"
+            density_csv = base / "density.csv"
+            events_output_csv = base / "events_output.csv"
+            report_markdown = base / "report.md"
+
+            self._write_source_db(source_db)
+            self._write_events_csv(events_csv)
+
+            exit_code = main(
+                [
+                    "--events-csv",
+                    str(events_csv),
+                    "--source-db",
+                    str(source_db),
+                    "--summary-csv",
+                    str(summary_csv),
+                    "--density-csv",
+                    str(density_csv),
+                    "--events-output-csv",
+                    str(events_output_csv),
+                    "--report-markdown",
+                    str(report_markdown),
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            self.assertTrue(summary_csv.exists())
 
 
 if __name__ == "__main__":

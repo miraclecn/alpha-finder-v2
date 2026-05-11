@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import argparse
+import math
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -201,3 +204,209 @@ def summarize_variant_years(variant_rows: pd.DataFrame | list[dict[str, Any]]) -
         )
 
     return pd.DataFrame(summary_rows), pd.DataFrame(density_rows)
+
+
+def load_first_break_events(events_csv_path: Path) -> pd.DataFrame:
+    events = pd.read_csv(events_csv_path)
+    required_columns = {"security_id", "signal_date", "start_high"}
+    missing = sorted(required_columns - set(events.columns))
+    if missing:
+        missing_text = ", ".join(missing)
+        raise ValueError(f"events CSV missing required columns: {missing_text}")
+
+    ordered = events.copy()
+    ordered["security_id"] = ordered["security_id"].astype(str)
+    ordered["signal_date"] = ordered["signal_date"].astype(str)
+    return ordered.sort_values(["security_id", "signal_date"]).reset_index(drop=True)
+
+
+def load_bar_history(
+    source_db_path: Path,
+    security_ids: list[str],
+    min_signal_date: str,
+) -> dict[str, pd.DataFrame]:
+    if not security_ids:
+        return {}
+
+    import duckdb
+
+    placeholders = ", ".join(["?"] * len(security_ids))
+    sql = f"""
+        SELECT
+            security_id,
+            trade_date,
+            open_adj,
+            high_adj,
+            low_adj,
+            close_adj
+        FROM daily_bar_pit
+        WHERE security_id IN ({placeholders})
+          AND trade_date >= ?
+          AND exchange IN ('SH', 'SZ')
+          AND board = 'main_board'
+          AND coalesce(is_st, false) = false
+        ORDER BY security_id, trade_date
+    """
+    params: list[Any] = [*security_ids, str(min_signal_date)]
+
+    conn = duckdb.connect(str(source_db_path), read_only=True)
+    try:
+        frame = conn.execute(sql, params).fetchdf()
+    finally:
+        conn.close()
+
+    if frame.empty:
+        return {}
+
+    grouped: dict[str, pd.DataFrame] = {}
+    for security_id, group in frame.groupby("security_id", sort=True, dropna=False):
+        grouped[str(security_id)] = group.reset_index(drop=True)
+    return grouped
+
+
+def _format_markdown_cell(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, float):
+        if math.isnan(value):
+            return ""
+        return f"{value:.6g}"
+    return str(value)
+
+
+def _markdown_table(frame: pd.DataFrame) -> str:
+    if frame.empty:
+        return "_No rows._"
+
+    headers = [str(col) for col in frame.columns]
+    lines = [
+        f"| {' | '.join(headers)} |",
+        f"| {' | '.join(['---'] * len(headers))} |",
+    ]
+    for row in frame.to_dict(orient="records"):
+        cells = [_format_markdown_cell(row.get(col)) for col in frame.columns]
+        lines.append(f"| {' | '.join(cells)} |")
+    return "\n".join(lines)
+
+
+def write_markdown_report(
+    *,
+    report_markdown_path: Path,
+    events_csv_path: Path,
+    source_db_path: Path,
+    summary: pd.DataFrame,
+    density: pd.DataFrame,
+) -> None:
+    lines = [
+        "# V Shape First Break Confirmation Study - 2026-05-12",
+        "",
+        "## Inputs",
+        f"- events_csv: `{events_csv_path}`",
+        f"- source_db: `{source_db_path}`",
+        "",
+        "## Summary",
+        _markdown_table(summary),
+        "",
+        "## Signal Density",
+        _markdown_table(density),
+        "",
+        "## Judgment",
+    ]
+
+    if summary.empty:
+        lines.append("- No rows available for judgment.")
+    else:
+        ranked = (
+            summary.groupby("variant_name", as_index=False)["confirmation_pass_rate"]
+            .mean()
+            .sort_values(["confirmation_pass_rate", "variant_name"], ascending=[False, True])
+            .reset_index(drop=True)
+        )
+        best = ranked.iloc[0]
+        lines.append(
+            "- Best average confirmation pass rate: "
+            f"`{best['variant_name']}` at {float(best['confirmation_pass_rate']):.2%}."
+        )
+
+    report_markdown_path.parent.mkdir(parents=True, exist_ok=True)
+    report_markdown_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def run_first_break_confirmation_study(
+    *,
+    events_csv_path: Path,
+    source_db_path: Path,
+    summary_csv_path: Path,
+    density_csv_path: Path,
+    events_output_csv_path: Path,
+    report_markdown_path: Path | None = None,
+) -> dict[str, pd.DataFrame]:
+    events = load_first_break_events(events_csv_path)
+    security_ids = sorted(events["security_id"].astype(str).unique().tolist())
+    min_signal_date = ""
+    if not events.empty:
+        min_signal_date = str(events["signal_date"].min())
+
+    bars_by_security = load_bar_history(source_db_path, security_ids, min_signal_date)
+
+    variants = [
+        ("baseline_first_break", 0),
+        ("confirm_2d", 2),
+        ("confirm_3d", 3),
+    ]
+    variant_frames = [
+        build_confirmation_variant(events, bars_by_security, variant_name=name, confirm_days=days)
+        for name, days in variants
+    ]
+    combined = pd.concat(variant_frames, ignore_index=True)
+
+    summary, density = summarize_variant_years(combined)
+    summary = summary.sort_values(["variant_name", "year"]).reset_index(drop=True)
+    density = density.sort_values(["variant_name", "year"]).reset_index(drop=True)
+    combined = combined.sort_values(["variant_name", "security_id", "signal_date"]).reset_index(drop=True)
+
+    summary_csv_path.parent.mkdir(parents=True, exist_ok=True)
+    density_csv_path.parent.mkdir(parents=True, exist_ok=True)
+    events_output_csv_path.parent.mkdir(parents=True, exist_ok=True)
+    summary.to_csv(summary_csv_path, index=False)
+    density.to_csv(density_csv_path, index=False)
+    combined.to_csv(events_output_csv_path, index=False)
+
+    if report_markdown_path is not None:
+        write_markdown_report(
+            report_markdown_path=report_markdown_path,
+            events_csv_path=events_csv_path,
+            source_db_path=source_db_path,
+            summary=summary,
+            density=density,
+        )
+
+    return {"summary": summary, "density": density, "events": combined}
+
+
+def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run V-shape first-break confirmation variants.")
+    parser.add_argument("--events-csv", required=True, type=Path)
+    parser.add_argument("--source-db", required=True, type=Path)
+    parser.add_argument("--summary-csv", required=True, type=Path)
+    parser.add_argument("--density-csv", required=True, type=Path)
+    parser.add_argument("--events-output-csv", required=True, type=Path)
+    parser.add_argument("--report-markdown", required=False, type=Path)
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
+    run_first_break_confirmation_study(
+        events_csv_path=args.events_csv,
+        source_db_path=args.source_db,
+        summary_csv_path=args.summary_csv,
+        density_csv_path=args.density_csv,
+        events_output_csv_path=args.events_output_csv,
+        report_markdown_path=args.report_markdown,
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
