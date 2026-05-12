@@ -331,9 +331,10 @@ def write_markdown_report(
     lines = [
         "# V Shape First Break Confirmation Study - 2026-05-12",
         "",
-        "## Inputs",
-        f"- events_csv: `{events_csv_path}`",
-        f"- source_db: `{source_db_path}`",
+        "## Object",
+        f"- Source events: `{events_csv_path}`",
+        f"- Source DB: `{source_db_path}`",
+        "- Variants: `baseline_first_break`, `confirm_2d`, `confirm_3d`",
         "",
         "## Summary",
         "- Year basis: `signal_date` (event-origin year).",

@@ -292,6 +292,8 @@ class VShapeFirstBreakConfirmationIntegrationTest(unittest.TestCase):
 
             markdown = report_markdown.read_text(encoding="utf-8")
             self.assertIn("# V Shape First Break Confirmation Study - 2026-05-12", markdown)
+            self.assertIn("## Object", markdown)
+            self.assertIn("- Variants: `baseline_first_break`, `confirm_2d`, `confirm_3d`", markdown)
             self.assertIn("confirm_2d", markdown)
             self.assertIn("Judgment must be curated manually after reviewing full distribution metrics.", markdown)
 

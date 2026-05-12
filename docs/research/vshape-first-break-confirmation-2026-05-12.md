@@ -1,8 +1,9 @@
 # V Shape First Break Confirmation Study - 2026-05-12
 
-## Inputs
-- events_csv: `/tmp/vshape_first_break_events.csv`
-- source_db: `output/research_source.duckdb`
+## Object
+- Source events: `/tmp/vshape_first_break_events.csv`
+- Source DB: `output/research_source.duckdb`
+- Variants: `baseline_first_break`, `confirm_2d`, `confirm_3d`
 
 ## Summary
 - Year basis: `signal_date` (event-origin year).
