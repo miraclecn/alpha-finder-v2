@@ -2,6 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Current steering note, 2026-04-30:** The repository has now landed the
+> strategy failure attribution report, generated-strategy guardrails, and
+> shadow-live admission evaluator described below. The main remaining project
+> bottleneck is no longer missing gate machinery; it is the absence of a new
+> versioned research object that can pass the existing gates after the frozen
+> `trend_leadership_shadow_live_v1` candidate was rejected.
+
 **Goal:** Move V2 from a working A-share research framework to a professional, evidence-gated personal quant process that rejects weak strategies before paper trading.
 
 **Architecture:** Keep the V2 object chain unchanged. Add a strategy-quality gate above the existing data-quality gate, then diagnose the failed `trend_leadership` candidate before any new sleeve or signal generation work. Treat shadow-live as an operating-evidence phase, not as a way to rescue a failed historical strategy.
@@ -31,6 +38,7 @@ attached portfolio evidence and fails the second layer.
 - The audit evaluator now separates data-quality and strategy-quality gates;
   the current candidate fails the strategy-quality gate.
 - Shadow-live journal has `1` recorded cycle, below the `12` cycle minimum.
+- No successor research object is currently underwritten for capital review.
 
 ## Task 1: Make Strategy-Quality Failure Machine-Checkable
 
@@ -85,17 +93,17 @@ attached portfolio evidence and fails the second layer.
   alpha data.
 - It identifies whether losses are concentrated or broad-based.
 
-- [ ] Add a parser for `portfolio_backtest_result` JSON summaries, daily curve,
+- [x] Add a parser for `portfolio_backtest_result` JSON summaries, daily curve,
   fills, orders, and holdings.
-- [ ] Add yearly and monthly return buckets from the daily equity curve.
-- [ ] Add top loser/top winner holding contribution using realized holding
+- [x] Add yearly and monthly return buckets from the daily equity curve.
+- [x] Add top loser/top winner holding contribution using realized holding
   weights and daily raw returns.
-- [ ] Add industry contribution by joining holdings to
+- [x] Add industry contribution by joining holdings to
   `industry_classification_pit` in `output/research_source.duckdb`.
-- [ ] Add overlay-state comparison for dates with overlay observations.
-- [ ] Add CLI:
+- [x] Add overlay-state comparison for dates with overlay observations.
+- [x] Add CLI:
   `PYTHONPATH=src python3 -m alpha_find_v2 explain-strategy-failure --backtest output/trend_live_candidate_portfolio_with_overlay_daily_backtest.json --source-db output/research_source.duckdb --output output/trend_leadership_failure_attribution_20260429.json`.
-- [ ] Run
+- [x] Run
   `PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_strategy_failure_attribution.py' -v`.
 
 ## Task 3: Decide Whether `trend_leadership` Is Repairable
@@ -170,12 +178,12 @@ attached portfolio evidence and fails the second layer.
 - Realized slippage, blocked trades, cash drag, and manual overrides are
   compared against the promoted expectation.
 
-- [ ] Add strategy-quality gate dependency to shadow-live journal evaluation.
-- [ ] Add stale-data guard before signal build.
-- [ ] Add ST/delisting runtime guard using `security_master_ref`.
-- [ ] Add realized-vs-modeled slippage comparison to manual execution outcome
+- [x] Add strategy-quality gate dependency to shadow-live journal evaluation.
+- [x] Add stale-data guard before signal build.
+- [x] Add ST/delisting runtime guard using `security_master_ref`.
+- [x] Add realized-vs-modeled slippage comparison to manual execution outcome
   evaluation.
-- [ ] Run
+- [x] Run
   `PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_live_readiness.py' -v`
   and
   `PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_deployment.py' -v`.
@@ -238,3 +246,7 @@ ready" only when:
 - shadow-live operating policy can record every cycle from signal to realized
   decay review;
 - probation policy remains blocked until real shadow-live evidence exists.
+
+Until then, treat the current roadmap as largely complete on process controls
+and incomplete on candidate quality. The next forward step is not to loosen the
+gates; it is to create a new candidate bundle that survives them.

@@ -1,0 +1,14 @@
+id = "liquid_midcap_leader_continuation_strict_v1"
+name = "Liquid Midcap Leader Continuation Strict V1 Descriptor Set"
+thesis_id = "liquid_midcap_leader_continuation_strict"
+target_id = "open_t1_to_open_t20_net_cost"
+required_data = [
+  "weighted_momentum_quality",
+]
+selection_logic = "cross_sectional_rank_by_weighted_momentum_quality"
+
+[[components]]
+descriptor_id = "weighted_momentum_quality"
+role = "weighted_trend_quality"
+weight = 1.0
+transform = "cross_sectional_zscore"

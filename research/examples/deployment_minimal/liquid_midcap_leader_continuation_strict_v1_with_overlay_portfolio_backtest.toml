@@ -1,0 +1,20 @@
+schema_version = 1
+artifact_type = "portfolio_backtest_case"
+case_id = "liquid_midcap_leader_continuation_strict_v1_with_overlay_daily_backtest"
+description = "Daily portfolio-level backtest for the strict liquid-midcap weighted-momentum continuation candidate with the formal A-share risk overlay."
+portfolio_path = "research/examples/promotion_replay_real_output_liquid_midcap/strict_candidate_portfolio_with_overlay.toml"
+artifact_paths = [
+  "output/liquid_midcap_leader_continuation_strict_v1_artifact.json",
+]
+source_db_path = "output/research_source.duckdb"
+execution_policy_path = "config/execution_policies/a_share_next_open_v1.toml"
+default_cost_model_path = "config/cost_models/base_a_share_cash.toml"
+additional_cost_model_paths = [
+  "config/cost_models/high_a_share_cash.toml",
+]
+benchmark_state_path = "output/csi800_benchmark_state_history_2020_20260428.json"
+regime_overlay_observation_path = "output/liquid_midcap_leader_continuation_strict_v1_overlay_observations.json"
+start_date = "2020-01-02"
+end_date = "2026-04-28"
+initial_cash_cny = 10000000
+output_path = "output/liquid_midcap_leader_continuation_strict_v1_with_overlay_daily_backtest.json"

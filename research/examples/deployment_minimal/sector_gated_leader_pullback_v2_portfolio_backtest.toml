@@ -1,0 +1,19 @@
+schema_version = 1
+artifact_type = "portfolio_backtest_case"
+case_id = "sector_gated_leader_pullback_v2_daily_backtest"
+description = "Daily portfolio-level backtest for the sector-gated leader pullback V2 candidate from 2020 through the latest available April 2026 trade date."
+portfolio_path = "research/examples/promotion_replay_real_output_liquid_midcap/sector_gated_leader_pullback_v2_candidate_portfolio.toml"
+artifact_paths = [
+  "output/sector_gated_leader_pullback_v2_artifact.json",
+]
+source_db_path = "output/research_source.duckdb"
+execution_policy_path = "config/execution_policies/a_share_next_open_v1.toml"
+default_cost_model_path = "config/cost_models/base_a_share_cash.toml"
+additional_cost_model_paths = [
+  "config/cost_models/high_a_share_cash.toml",
+]
+benchmark_state_path = "output/csi800_benchmark_state_history_2020_20260428.json"
+start_date = "2020-01-02"
+end_date = "2026-04-28"
+initial_cash_cny = 10000000
+output_path = "output/sector_gated_leader_pullback_v2_daily_backtest.json"

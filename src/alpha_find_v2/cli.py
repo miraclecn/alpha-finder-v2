@@ -74,6 +74,8 @@ from .portfolio_backtester import (
     run_loaded_portfolio_backtest,
     write_portfolio_backtest_artifact,
 )
+from .backtrader_poc import run_named_backtrader_poc
+from .backtester_validation import run_backtester_validation_suite
 from .strategy_failure_attribution import (
     build_strategy_failure_attribution,
     write_strategy_failure_attribution,
@@ -654,6 +656,21 @@ def _parse_args() -> argparse.Namespace:
         help="Path to the portfolio-backtest case TOML file.",
     )
 
+    run_backtrader_poc = subparsers.add_parser(
+        "run-backtrader-poc",
+        help="Run the minimal Backtrader comparison proof-of-concept.",
+    )
+    run_backtrader_poc.add_argument(
+        "--scenario",
+        default="single_name_round_trip",
+        help="Named Backtrader POC scenario to run.",
+    )
+
+    subparsers.add_parser(
+        "validate-backtester",
+        help="Run the internal backtester qualification suite.",
+    )
+
     explain_strategy_failure = subparsers.add_parser(
         "explain-strategy-failure",
         help="Build a strategy failure attribution report from a daily portfolio backtest.",
@@ -1192,6 +1209,14 @@ def main() -> None:
                 "summary": asdict(result.summary) if result.summary is not None else None,
             }
         )
+        return
+
+    if args.command == "run-backtrader-poc":
+        _dump_json(asdict(run_named_backtrader_poc(args.scenario)))
+        return
+
+    if args.command == "validate-backtester":
+        _dump_json(asdict(run_backtester_validation_suite()))
         return
 
     if args.command == "explain-strategy-failure":

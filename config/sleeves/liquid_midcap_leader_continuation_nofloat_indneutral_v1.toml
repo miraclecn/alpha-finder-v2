@@ -1,0 +1,24 @@
+id = "liquid_midcap_leader_continuation_nofloat_indneutral_v1"
+name = "Liquid Midcap Leader Continuation No-Float Ind-Neutral V1 Sleeve"
+mandate_id = "a_share_long_only_eod"
+thesis_id = "liquid_midcap_leader_continuation_strict"
+descriptor_set_id = "liquid_midcap_leader_continuation_strict_v1"
+target_id = "open_t1_to_open_t20_net_cost"
+universe = "investable_a_share_core"
+rebalance_frequency = "biweekly"
+target_holding_days = 20
+turnover_budget = 0.12
+execution_rule = "next_day_open"
+neutralization = ["industry"]
+
+[construction]
+selection = "rank_then_cap_weight"
+holding_count = 24
+weight_cap = 0.05
+
+[constraints]
+min_median_daily_turnover_cny_mn = 0
+min_float_mcap_cny_bn = 0
+max_float_mcap_cny_bn = 0
+exclude_price_limit_lock = true
+single_industry_name_cap = 0

@@ -1,0 +1,37 @@
+id = "liquid_midcap_leader_continuation"
+name = "Liquid Midcap Leader Continuation"
+family = "medium_alpha"
+mechanism = "Liquid mid-cap A-share stocks with strong recent-weighted momentum, high trend path quality, industry-relative leadership, and non-exhaustive turnover can continue outperforming over the next 20 trading days."
+why_a_share = "A-share mid-cap leadership often persists after orderly trend confirmation, but the broad stock pool requires explicit liquidity, free-float market-cap, path-quality, and overheat filters to avoid fragile mark-ups."
+expected_sign = "positive"
+expected_horizon_days = [10, 30]
+required_data = [
+  "weighted_momentum_quality",
+  "industry_relative_strength",
+  "trend_stability",
+  "turnover_confirmation",
+  "volume_overheat_control",
+  "tradeability_state",
+  "float_mcap_cny",
+]
+regime_dependencies = [
+  "works better when A-share leadership breadth and industry sponsorship persist",
+  "should weaken during broad deleveraging, one-day limit-up clusters, or high-volume blow-off reversals",
+]
+failure_modes = [
+  "midcap_liquidity_crunch",
+  "late_stage_blowoff_move",
+  "industry_false_breakout",
+  "crowded_theme_unwind",
+]
+falsification_rules = [
+  "net_of_cost_active_ir_is_below_gate_threshold_across_the_registered_validation_window",
+  "positive_result_disappears_after_weighted_momentum_r2_and_overheat_filters_are_applied",
+]
+portfolio_role = "candidate medium-horizon alpha sleeve"
+
+[validation]
+primary_target = "20d_executable_net_return_interim"
+cost_scenarios = ["base", "high"]
+must_pass_regimes = ["bull", "bear", "high_dispersion", "low_dispersion"]
+

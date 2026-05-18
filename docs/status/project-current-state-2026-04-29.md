@@ -1,5 +1,11 @@
 # Project Current State - 2026-04-29
 
+> Update on `2026-04-30`: the repository now contains machine-checkable
+> strategy failure attribution, generated-strategy guardrails, and
+> shadow-live admission evaluation. The current gap is no longer missing gate
+> machinery; it is the absence of a new admissible research object after the
+> frozen `trend_leadership_shadow_live_v1` candidate was rejected.
+
 ## Executive Judgment
 
 `alpha-find-v2` has become a credible research and evidence framework for a
@@ -27,6 +33,7 @@ Current professional status:
 | Tradeability | usable | Official rows cover nearly all `daily_bar_pit`; residual fallback is explicit. |
 | Backtest ledger | improved | Raw fills/marks, explicit corporate actions, T+1, min trade, and fallback diagnostics exist. |
 | Control truthfulness | improved | Unsupported size/beta controls are not marked enforced. |
+| Diagnosis / guardrails / admission machinery | built | Failure attribution, generated-strategy guardrails, and shadow-live gate evaluation are now machine-checkable in repo. |
 | Current trend candidate | rejected for capital | Data-quality gate is clean, but active returns, drawdown, and turnover are unacceptable. |
 | Release-1 portfolio scope | inactive target recipe only | `a_share_core` remains a reference config, not an admitted capital path. |
 | Shadow-live evidence | insufficient | Journal has `1` cycle; minimum policy target is `12` consecutive weekly cycles. |
@@ -128,6 +135,9 @@ Current truth sources:
 - Data boundary: `docs/data/v2-data-boundary-and-pit-audit.md`
 - V1 reuse boundary: `docs/data/v1-duckdb-reuse-audit.md`
 - Live-candidate operations: `docs/operations/trend-leadership-live-candidate-v1.md`
+- Failure review: `docs/research/trend-leadership-failure-review-2026-04-29.md`
+- Failure attribution artifact: `output/trend_leadership_failure_attribution_20260429.json`
+- Strategy-generation guardrails: `docs/architecture/strategy-generation-guardrails.md`
 - Release-scope review: `docs/research/release-1-scope-review-2026-04-29.md`
 - Trusted backtest and strategy-generation roadmap:
   `docs/superpowers/plans/2026-04-28-trusted-backtest-strategy-generation-risk-roadmap.md`
@@ -140,24 +150,31 @@ Superseded implementation plans were moved to:
 
 ## Quant Finance Assessment
 
-The next risk is not missing code for signal generation. The next risk is false
-confidence.
+The next risk is no longer missing code for signal generation, failure
+attribution, or admission gates. The next risk is false confidence about what
+the completed machinery means.
 
-A professional quant workflow would not tune around a negative backtest without
-first answering:
+The repo now answers the immediate professional-control questions for the
+frozen candidate:
 
-1. Is the loss caused by a bug in target timing, weight construction, cost
-   handling, or overlay application?
-2. Is the signal buying a known negative exposure such as crowding, reversal
-   after exhaustion, size/liquidity, or unstable industry beta?
-3. Does the edge exist only in a narrow market state, or does it fail across all
-   regimes?
-4. Is turnover economically justified after A-share frictions, or is the model
-   paying too much to chase stale momentum?
-5. Is the current `trend_leadership` thesis invalid, or only its descriptor and
-   construction choices?
+1. Is the loss explained by a missing data/accounting gate?
+   Current answer: no; the attached candidate evidence is clean on the
+   implemented data-quality blockers.
+2. Is the current bundle admissible after strategy-quality review?
+   Current answer: no; active IR, drawdown, and turnover fail the gate.
+3. Is further parameter search on `trend_leadership_shadow_live_v1` justified?
+   Current answer: no; the failure review rejects the frozen candidate version.
 
-Until those questions are answered with reproducible diagnostics, the right
-state is:
+The remaining work is therefore narrower and more demanding:
 
-`research framework ready -> current candidate rejected -> strategy diagnosis required`
+1. Define a new versioned research object only if it has a specific economic
+   mechanism, a descriptor set that actually binds that mechanism, and a target
+   surface consistent with A-share execution reality.
+2. Re-run the same data-quality, strategy-quality, promotion, and shadow-live
+   gates on that new object instead of tuning around the rejected bundle.
+3. Accumulate honest shadow-live evidence only after a new bundle passes the
+   multi-year strategy-quality gate.
+
+The right state is now:
+
+`research framework ready -> admission machinery built -> current candidate rejected -> new research object required`

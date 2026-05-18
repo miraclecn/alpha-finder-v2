@@ -1,0 +1,34 @@
+id = "sector_gated_leader_pullback"
+name = "Sector Gated Leader Pullback"
+family = "medium_alpha"
+mechanism = "Stocks can outperform in a second leg when their industry enters a supported early-trend phase, the stock remains a within-industry leader, and pullbacks stay orderly enough to preserve continuation."
+why_a_share = "A-share trends usually extend through industry rotation rather than isolated single-name momentum. Gating the stock book to a small set of strong industries is a cleaner way to target early-stage participation while reducing full-market churn."
+expected_sign = "positive"
+expected_horizon_days = [10, 30]
+required_data = [
+  "medium_term_relative_strength",
+  "industry_relative_strength",
+  "trend_stability",
+  "turnover_confirmation",
+  "tradeability_state",
+  "float_mcap_cny",
+]
+regime_dependencies = [
+  "works better when industry breadth is improving and leadership is spreading beyond one-day spikes",
+  "should weaken when industry rotation is chaotic or leadership concentration collapses",
+]
+failure_modes = [
+  "late_stage_theme_chase",
+  "single_theme_false_breakout",
+  "weak_breadth_sector_spike",
+]
+falsification_rules = [
+  "net_of_cost_active_ir_is_below_gate_threshold_across_the_registered_validation_window",
+  "turnover_remains_excessive_after_sector_gating_and_hold-band_retention_are_added",
+]
+portfolio_role = "candidate medium-horizon alpha sleeve"
+
+[validation]
+primary_target = "20d_executable_net_return_interim"
+cost_scenarios = ["base", "high"]
+must_pass_regimes = ["bull", "bear", "high_dispersion", "low_dispersion"]

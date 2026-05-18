@@ -117,3 +117,9 @@ The remaining credibility work is tracked in
 `docs/superpowers/plans/2026-04-29-professional-quant-roadmap.md`, with the
 technical backtest/data roadmap retained in
 `docs/superpowers/plans/2026-04-28-trusted-backtest-strategy-generation-risk-roadmap.md`.
+
+As of `2026-04-30`, the repo already contains the candidate-level failure
+attribution report, generated-strategy guardrails, and machine-checkable
+shadow-live journal evaluation described above. The remaining gap is not a
+missing admission control on this frozen bundle; it is the lack of a new,
+mechanism-backed research object that can clear those controls.

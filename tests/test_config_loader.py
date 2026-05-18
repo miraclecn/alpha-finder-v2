@@ -46,6 +46,9 @@ class ConfigLoaderTest(unittest.TestCase):
                 "flow_liquidity_reversal",
                 "fundamental_rerating",
                 "leader_pullback_continuation",
+                "liquid_midcap_leader_continuation",
+                "liquid_midcap_leader_continuation_strict",
+                "sector_gated_leader_pullback",
                 "trend_leadership",
             },
         )
@@ -209,6 +212,36 @@ class ConfigLoaderTest(unittest.TestCase):
             },
         )
 
+    def test_liquid_midcap_sleeve_binds_weighted_momentum_object(self) -> None:
+        sleeve = load_sleeve(
+            CONFIG_ROOT / "sleeves" / "liquid_midcap_leader_continuation_v1.toml"
+        )
+        descriptor_set = load_descriptor_set(
+            CONFIG_ROOT / "descriptor_sets" / f"{sleeve.descriptor_set_id}.toml"
+        )
+
+        weights = {
+            component.descriptor_id: component.weight
+            for component in descriptor_set.components
+        }
+        self.assertEqual(sleeve.thesis_id, "liquid_midcap_leader_continuation")
+        self.assertEqual(sleeve.rebalance_frequency, "biweekly")
+        self.assertEqual(sleeve.construction["holding_count"], 24)
+        self.assertEqual(sleeve.construction["weight_cap"], 0.05)
+        self.assertEqual(sleeve.constraints["min_float_mcap_cny_bn"], 5)
+        self.assertEqual(sleeve.constraints["max_float_mcap_cny_bn"], 30)
+        self.assertEqual(sleeve.constraints["single_industry_name_cap"], 3)
+        self.assertEqual(
+            weights,
+            {
+                "weighted_momentum_quality": 0.35,
+                "industry_relative_strength": 0.25,
+                "trend_stability": 0.20,
+                "turnover_confirmation": 0.10,
+                "volume_overheat_control": 0.10,
+            },
+        )
+
     def test_real_output_replay_examples_bind_generated_second_trend_lane(self) -> None:
         trend_input_case = tomllib.loads(
             (PROJECT_ROOT / "research/examples/trend_input_build_minimal/trend_resilience_core.toml").read_text(
@@ -325,6 +358,61 @@ class ConfigLoaderTest(unittest.TestCase):
         self.assertEqual(
             audit_case["trend_research_input_build_case_path"],
             "research/examples/trend_input_build_minimal/leader_pullback_continuation_v1.toml",
+        )
+
+    def test_sector_gated_v2_example_chain_is_self_consistent(self) -> None:
+        trend_input_case = tomllib.loads(
+            (
+                PROJECT_ROOT
+                / "research/examples/trend_input_build_minimal/sector_gated_leader_pullback_v2.toml"
+            ).read_text(encoding="utf-8")
+        )
+        artifact_case = tomllib.loads(
+            (
+                PROJECT_ROOT
+                / "research/examples/artifact_build_minimal/sector_gated_leader_pullback_v2_output.toml"
+            ).read_text(encoding="utf-8")
+        )
+        candidate_portfolio = tomllib.loads(
+            (
+                PROJECT_ROOT
+                / "research/examples/promotion_replay_real_output_liquid_midcap/sector_gated_leader_pullback_v2_candidate_portfolio.toml"
+            ).read_text(encoding="utf-8")
+        )
+        backtest_case = tomllib.loads(
+            (
+                PROJECT_ROOT
+                / "research/examples/deployment_minimal/sector_gated_leader_pullback_v2_portfolio_backtest.toml"
+            ).read_text(encoding="utf-8")
+        )
+
+        self.assertEqual(
+            trend_input_case["sleeve_path"],
+            "config/sleeves/sector_gated_leader_pullback_v2.toml",
+        )
+        self.assertEqual(
+            trend_input_case["industry_ranking_mode"],
+            "breadth_then_momentum",
+        )
+        self.assertEqual(
+            artifact_case["input_path"],
+            "output/sector_gated_leader_pullback_v2_input.json",
+        )
+        self.assertEqual(
+            artifact_case["output_path"],
+            "output/sector_gated_leader_pullback_v2_artifact.json",
+        )
+        self.assertEqual(
+            candidate_portfolio["sleeves"],
+            ["sector_gated_leader_pullback_v2"],
+        )
+        self.assertEqual(
+            backtest_case["artifact_paths"],
+            ["output/sector_gated_leader_pullback_v2_artifact.json"],
+        )
+        self.assertEqual(
+            backtest_case["portfolio_path"],
+            "research/examples/promotion_replay_real_output_liquid_midcap/sector_gated_leader_pullback_v2_candidate_portfolio.toml",
         )
 
     def test_target_references_versioned_risk_model(self) -> None:
