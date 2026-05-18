@@ -1,0 +1,19 @@
+id = "leader_pullback_baseline_portfolio"
+name = "Leader Pullback Baseline Portfolio"
+mandate_id = "a_share_long_only_eod"
+benchmark = "CSI 800"
+rebalance_policy = "staggered_biweekly"
+description = "Baseline portfolio that keeps the frozen trend-leadership sleeve as the comparison book for the new leader-pullback lane."
+construction_model_id = "a_share_core_blend"
+promotion_gate_id = "research_example_replay_gate"
+execution_policy_id = "a_share_next_open_v1"
+decay_monitor_id = "a_share_core_watch"
+sleeves = ["trend_leadership_core"]
+
+[allocation]
+trend_leadership_core = 1.0
+
+[constraints]
+max_names = 22
+max_single_name_weight = 0.08
+max_industry_overweight = 0.10

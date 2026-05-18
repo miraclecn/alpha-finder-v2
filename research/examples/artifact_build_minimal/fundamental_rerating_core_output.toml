@@ -1,0 +1,8 @@
+schema_version = 1
+artifact_type = "sleeve_artifact_build_case"
+
+case_id = "fundamental_rerating_core_output_build"
+description = "Build the slower quality/value anchor sleeve artifact directly from the generated output/fundamental_rerating_core_input.json observation input."
+sleeve_path = "config/sleeves/fundamental_rerating_core.toml"
+input_path = "output/fundamental_rerating_core_input.json"
+output_path = "output/fundamental_rerating_core_artifact.json"

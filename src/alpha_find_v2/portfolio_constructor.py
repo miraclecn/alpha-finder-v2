@@ -33,6 +33,9 @@ class PortfolioConstructionStep:
     capped_names: list[str] = field(default_factory=list)
     industry_scaled_names: list[str] = field(default_factory=list)
     cash_weight: float = 0.0
+    selection_cash_weight: float = 0.0
+    single_name_cap_cash_weight: float = 0.0
+    industry_cap_cash_weight: float = 0.0
 
 
 @dataclass(slots=True)
@@ -53,6 +56,7 @@ class PortfolioConstructor:
         portfolio: PortfolioRecipe,
         construction_model: PortfolioConstructionModel,
     ) -> None:
+        self._validate_supported_construction_model(construction_model)
         self.mandate = mandate
         self.portfolio = portfolio
         self.construction_model = construction_model
@@ -63,7 +67,7 @@ class PortfolioConstructor:
         )
 
     def _build_step(self, construction_input: PortfolioConstructionInput) -> PortfolioConstructionStep:
-        combined_weights: dict[str, float] = {}
+        weight_contributions: dict[str, list[float]] = {}
         metadata_by_asset: dict[str, PortfolioSecuritySignal] = {}
         asset_sleeves: dict[str, set[str]] = {}
 
@@ -83,21 +87,36 @@ class PortfolioConstructor:
                     metadata_by_asset.get(signal.asset_id),
                     signal,
                 )
-                combined_weights[signal.asset_id] = (
-                    combined_weights.get(signal.asset_id, 0.0)
-                    + signal.target_weight * scale
+                weight_contributions.setdefault(signal.asset_id, []).append(
+                    signal.target_weight * scale
                 )
                 asset_sleeves.setdefault(signal.asset_id, set()).add(sleeve_input.sleeve_id)
 
+        combined_weights = self._combine_weight_contributions(weight_contributions)
         overlap_names = sorted(
             asset_id for asset_id, sleeve_ids in asset_sleeves.items() if len(sleeve_ids) > 1
         )
+
+        pre_selection_weight = sum(combined_weights.values())
         combined_weights, dropped_names = self._apply_name_selection(combined_weights)
+        selection_cash_weight = max(pre_selection_weight - sum(combined_weights.values()), 0.0)
+
+        pre_single_name_cap_weight = sum(combined_weights.values())
         combined_weights, capped_names = self._apply_single_name_caps(combined_weights)
+        single_name_cap_cash_weight = max(
+            pre_single_name_cap_weight - sum(combined_weights.values()),
+            0.0,
+        )
+
+        pre_industry_cap_weight = sum(combined_weights.values())
         combined_weights, industry_scaled_names = self._apply_industry_caps(
             combined_weights,
             metadata_by_asset,
             construction_input.benchmark_industry_weights,
+        )
+        industry_cap_cash_weight = max(
+            pre_industry_cap_weight - sum(combined_weights.values()),
+            0.0,
         )
 
         ordered_assets = sorted(
@@ -122,7 +141,35 @@ class PortfolioConstructor:
             capped_names=capped_names,
             industry_scaled_names=industry_scaled_names,
             cash_weight=max(1.0 - sum(signal.target_weight for signal in signals), 0.0),
+            selection_cash_weight=selection_cash_weight,
+            single_name_cap_cash_weight=single_name_cap_cash_weight,
+            industry_cap_cash_weight=industry_cap_cash_weight,
         )
+
+    def _validate_supported_construction_model(
+        self,
+        construction_model: PortfolioConstructionModel,
+    ) -> None:
+        if construction_model.sleeve_weight_source != "portfolio_allocation":
+            raise ValueError(
+                "Unsupported portfolio construction sleeve_weight_source: "
+                f"{construction_model.sleeve_weight_source}"
+            )
+        if construction_model.name_selection != "top_weight":
+            raise ValueError(
+                "Unsupported portfolio construction name_selection: "
+                f"{construction_model.name_selection}"
+            )
+        if construction_model.excess_weight_policy != "hold_cash":
+            raise ValueError(
+                "Unsupported portfolio construction excess_weight_policy: "
+                f"{construction_model.excess_weight_policy}"
+            )
+        if construction_model.industry_budget_mode not in {"", "benchmark_relative"}:
+            raise ValueError(
+                "Unsupported portfolio construction industry_budget_mode: "
+                f"{construction_model.industry_budget_mode}"
+            )
 
     def _positive_signals(
         self,
@@ -137,6 +184,28 @@ class PortfolioConstructor:
             if signal.target_weight > 0.0:
                 positive.append(signal)
         return positive
+
+    def _combine_weight_contributions(
+        self,
+        weight_contributions: dict[str, list[float]],
+    ) -> dict[str, float]:
+        overlap_mode = self.construction_model.overlap_mode
+        if overlap_mode == "sum":
+            return {
+                asset_id: sum(contributions)
+                for asset_id, contributions in weight_contributions.items()
+            }
+        if overlap_mode == "max":
+            return {
+                asset_id: max(contributions)
+                for asset_id, contributions in weight_contributions.items()
+            }
+        if overlap_mode == "average":
+            return {
+                asset_id: sum(contributions) / len(contributions)
+                for asset_id, contributions in weight_contributions.items()
+            }
+        raise ValueError(f"Unsupported portfolio construction overlap_mode: {overlap_mode}")
 
     def _apply_name_selection(
         self,

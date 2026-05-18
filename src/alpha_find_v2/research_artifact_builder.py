@@ -119,7 +119,11 @@ def _build_record(
         if builder is None:
             raise ValueError(f"Unknown cost model for artifact record: {record.cost_model_id}")
 
-    gross_return = (record.exit_open / record.entry_open) - 1.0
+    gross_return = (
+        record.gross_holding_return
+        if record.gross_holding_return is not None
+        else (record.exit_open / record.entry_open) - 1.0
+    )
     risk_decomposition = None
     if record.exposures and builder.target.residualization:
         if residualizer is None:
@@ -140,6 +144,7 @@ def _build_record(
     observation = TargetObservation(
         entry_open=record.entry_open,
         exit_open=record.exit_open,
+        gross_holding_return=record.gross_holding_return,
         entry_state=record.entry_state,
         exit_state=record.exit_state,
         residual_components=record.residual_components,

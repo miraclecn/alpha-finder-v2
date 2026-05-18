@@ -1,0 +1,19 @@
+id = "trend_residual_real_output_baseline_portfolio"
+name = "Trend Residual Real Output Baseline Portfolio"
+mandate_id = "a_share_long_only_eod"
+benchmark = "CSI 800"
+rebalance_policy = "weekly"
+description = "Baseline weekly residual real-output book with the residualized trend-leadership sleeve only."
+construction_model_id = "a_share_core_blend"
+promotion_gate_id = "research_example_replay_gate"
+execution_policy_id = "a_share_next_open_v1"
+decay_monitor_id = "a_share_core_watch"
+sleeves = ["trend_leadership_core_residual"]
+
+[allocation]
+trend_leadership_core_residual = 1.0
+
+[constraints]
+max_names = 16
+max_single_name_weight = 0.08
+max_industry_overweight = 0.10

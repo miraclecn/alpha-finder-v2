@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "artifact_type": "run_manifest",
+  "run_id": "candidate_portfolio_next_open_2026_04_20",
+  "package_id": "research_example_candidate_portfolio:2026-04-20",
+  "portfolio_id": "research_example_candidate_portfolio",
+  "mandate_id": "a_share_long_only_eod",
+  "trade_date": "2026-04-20",
+  "execution_date": "2026-04-21",
+  "data_version": "tushare_2000",
+  "data_build_date": "2026-04-20",
+  "benchmark_state_path": "research/examples/promotion_replay_minimal/benchmark_state_history.json",
+  "sleeve_artifact_paths": [
+    "research/examples/promotion_replay_minimal/sleeve_artifacts/fundamental_rerating_core.json",
+    "research/examples/promotion_replay_minimal/sleeve_artifacts/trend_leadership_core.json"
+  ],
+  "portfolio_path": "research/examples/deployment_minimal/candidate_portfolio.toml",
+  "account_state_path": "research/examples/deployment_minimal/account_state_2026_04_20.json",
+  "portfolio_state_path": "",
+  "execution_policy_id": "a_share_next_open_v1",
+  "regime_overlay_status": "",
+  "regime_overlay_state": "",
+  "operator_id": "nan",
+  "operator_timestamp": "2026-04-21T09:20:00+08:00"
+}

@@ -1,0 +1,31 @@
+id = "liquid_midcap_leader_continuation_strict"
+name = "Liquid Midcap Leader Continuation Strict"
+family = "medium_alpha"
+mechanism = "A-share adaptation of the ETF rotation core: rank liquid mid-cap stocks by 25-day recent-weighted log-price momentum, then keep only names with acceptable path quality and non-exhaustive volume."
+why_a_share = "The stock universe is broader and noisier than an ETF pool, so the A-share adaptation keeps the original momentum, R-squared, volume, and short-term loss controls while adding only float-market-cap and execution-reality bounds."
+expected_sign = "positive"
+expected_horizon_days = [10, 30]
+required_data = [
+  "weighted_momentum_quality",
+  "tradeability_state",
+  "float_mcap_cny",
+]
+regime_dependencies = [
+  "works better when A-share leadership trends persist and market risk appetite is stable",
+  "should weaken during broad risk-off breakouts with poor follow-through",
+]
+failure_modes = [
+  "low_quality_breakout",
+  "crowded_midcap_unwind",
+  "broad_risk_off_gap",
+]
+falsification_rules = [
+  "net_of_cost_active_ir_is_below_gate_threshold_across_the_registered_validation_window",
+  "positive_result_disappears_after_path_quality_and_volume_filters_are_applied",
+]
+portfolio_role = "candidate medium-horizon alpha sleeve"
+
+[validation]
+primary_target = "20d_executable_net_return_interim"
+cost_scenarios = ["base", "high"]
+must_pass_regimes = ["bull", "bear", "high_dispersion", "low_dispersion"]

@@ -17,6 +17,7 @@ class TradeLegState:
 class TargetObservation:
     entry_open: float
     exit_open: float
+    gross_holding_return: float | None = None
     entry_state: TradeLegState = field(default_factory=TradeLegState)
     exit_state: TradeLegState = field(default_factory=TradeLegState)
     residual_components: dict[str, float] = field(default_factory=dict)
@@ -86,7 +87,11 @@ class ExecutableResidualTargetBuilder:
             raise ValueError(f"Missing residual components for target evaluation: {joined}")
 
         excluded_reasons = self._check_eligibility(observation)
-        gross_return = (observation.exit_open / observation.entry_open) - 1.0
+        gross_return = (
+            observation.gross_holding_return
+            if observation.gross_holding_return is not None
+            else (observation.exit_open / observation.entry_open) - 1.0
+        )
         net_return = gross_return - (self.cost_model.round_trip_bps() / 10_000.0)
         common_return = sum(
             residual_components[component]

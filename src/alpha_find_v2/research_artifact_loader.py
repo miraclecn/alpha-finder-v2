@@ -14,6 +14,7 @@ from .config_loader import (
     load_portfolio,
     load_portfolio_construction_model,
     load_promotion_gate,
+    load_regime_overlay,
     load_risk_model,
     load_sleeve,
     load_target,
@@ -25,11 +26,13 @@ from .models import (
     PortfolioConstructionModel,
     PortfolioRecipe,
     PromotionGate,
+    RegimeOverlay,
     ResidualTarget,
     RiskModel,
     Sleeve,
 )
 from .portfolio_promotion_replay import (
+    CorporateActionExceptionWindow,
     PortfolioPromotionReplayInput,
     ReplayWalkForwardSplitDefinition,
     SleeveResearchArtifact,
@@ -37,6 +40,11 @@ from .portfolio_promotion_replay import (
     SleeveSignalRecord,
 )
 from .portfolio_simulator import TradeConstraintState
+from .regime_overlay import (
+    RegimeOverlayObservationArtifact,
+    load_regime_overlay_observation_artifact,
+)
+from .staggered_rebalance import tranche_count_for_policy
 from .target_builder import TradeLegState
 
 
@@ -61,6 +69,9 @@ class PortfolioPromotionReplayCaseDefinition:
     additional_cost_model_paths: list[str] = field(default_factory=list)
     benchmark_state_path: str = ""
     benchmark_industry_weights_path: str = ""
+    regime_overlay_observation_path: str = ""
+    market_data_source_db_path: str = ""
+    market_data_quality_audit_path: str = ""
     periods_per_year: int = 52
     cost_scenario_pass: dict[str, bool] = field(default_factory=dict)
     regime_pass: dict[str, bool] = field(default_factory=dict)
@@ -96,6 +107,13 @@ class PortfolioPromotionReplayCaseDefinition:
             benchmark_industry_weights_path=str(
                 data.get("benchmark_industry_weights_path", "")
             ),
+            regime_overlay_observation_path=str(
+                data.get("regime_overlay_observation_path", "")
+            ),
+            market_data_source_db_path=str(data.get("market_data_source_db_path", "")),
+            market_data_quality_audit_path=str(
+                data.get("market_data_quality_audit_path", "")
+            ),
             periods_per_year=int(data.get("periods_per_year", 52)),
             cost_scenario_pass={
                 str(key): bool(value)
@@ -127,6 +145,8 @@ class LoadedPortfolioPromotionReplayCase:
     gate: PromotionGate | None = None
     cost_models: dict[str, CostModel] = field(default_factory=dict)
     benchmark_state_artifact: BenchmarkStateArtifact | None = None
+    regime_overlay: RegimeOverlay | None = None
+    regime_overlay_observations: RegimeOverlayObservationArtifact | None = None
 
 
 @dataclass(slots=True)
@@ -137,6 +157,7 @@ class SleeveResearchObservationRecord:
     target_weight: float
     entry_open: float
     exit_open: float
+    gross_holding_return: float | None = None
     cost_model_id: str = ""
     industry: str = ""
     entry_state: TradeLegState = field(default_factory=TradeLegState)
@@ -339,10 +360,61 @@ def load_portfolio_promotion_replay_case(
                 "Replay case benchmark state must match the candidate portfolio benchmark."
             )
 
+    regime_overlay = None
+    regime_overlay_observations = None
+    if candidate_portfolio.regime_overlay_id:
+        regime_overlay = load_regime_overlay(
+            CONFIG_ROOT
+            / "regime_overlays"
+            / f"{candidate_portfolio.regime_overlay_id}.toml"
+        )
+        if not definition.regime_overlay_observation_path:
+            raise ValueError(
+                "Replay case must define regime_overlay_observation_path when the candidate portfolio declares regime_overlay_id."
+            )
+        regime_overlay_observations = load_regime_overlay_observation_artifact(
+            definition.regime_overlay_observation_path
+        )
+        if regime_overlay.mandate_id != candidate_portfolio.mandate_id:
+            raise ValueError(
+                "Replay case regime overlay mandate must match the candidate portfolio mandate."
+            )
+        if regime_overlay.benchmark != candidate_portfolio.benchmark:
+            raise ValueError(
+                "Replay case regime overlay benchmark must match the candidate portfolio benchmark."
+            )
+        if regime_overlay_observations.overlay_id != regime_overlay.id:
+            raise ValueError(
+                "Replay case regime overlay observations must match the configured regime_overlay_id."
+            )
+    elif definition.regime_overlay_observation_path:
+        raise ValueError(
+            "Replay case cannot define regime_overlay_observation_path without a candidate portfolio regime_overlay_id."
+        )
+
+    corporate_action_exception_windows = (
+        _load_corporate_action_exception_windows(definition.market_data_source_db_path)
+        if definition.market_data_source_db_path.strip()
+        else []
+    )
     replay_input = PortfolioPromotionReplayInput(
         baseline_portfolio=baseline_portfolio,
         candidate_portfolio=candidate_portfolio,
         artifacts=artifacts,
+        baseline_tranche_count=_portfolio_tranche_count(
+            portfolio=baseline_portfolio,
+            artifacts=artifacts,
+        ),
+        candidate_tranche_count=_portfolio_tranche_count(
+            portfolio=candidate_portfolio,
+            artifacts=artifacts,
+        ),
+        regime_overlay=regime_overlay,
+        regime_overlay_observations=(
+            regime_overlay_observations.steps
+            if regime_overlay_observations is not None
+            else []
+        ),
         periods_per_year=definition.periods_per_year,
         benchmark_industry_weights_by_date=benchmark_weights_by_date,
         cost_scenario_pass=definition.cost_scenario_pass,
@@ -351,6 +423,8 @@ def load_portfolio_promotion_replay_case(
         correlation_to_existing_portfolio=definition.correlation_to_existing_portfolio,
         turnover_budget=definition.turnover_budget,
         walk_forward_splits=definition.walk_forward_splits,
+        corporate_action_exception_windows=corporate_action_exception_windows,
+        market_data_quality_audit_path=definition.market_data_quality_audit_path,
     )
     return LoadedPortfolioPromotionReplayCase(
         definition=definition,
@@ -361,6 +435,8 @@ def load_portfolio_promotion_replay_case(
         gate=gate,
         cost_models=cost_models,
         benchmark_state_artifact=benchmark_artifact,
+        regime_overlay=regime_overlay,
+        regime_overlay_observations=regime_overlay_observations,
     )
 
 
@@ -434,6 +510,11 @@ def _load_research_observation_record(data: JsonMap) -> SleeveResearchObservatio
         target_weight=float(data["target_weight"]),
         entry_open=float(data["entry_open"]),
         exit_open=float(data["exit_open"]),
+        gross_holding_return=(
+            None
+            if data.get("gross_holding_return") is None
+            else float(data["gross_holding_return"])
+        ),
         cost_model_id=str(data.get("cost_model_id", "")),
         industry=str(data.get("industry", "")),
         entry_state=_load_trade_leg_state(data.get("entry_state", {})),
@@ -508,3 +589,117 @@ def _load_gate(candidate_portfolio: PortfolioRecipe) -> PromotionGate | None:
     return load_promotion_gate(
         CONFIG_ROOT / "promotion_gates" / f"{candidate_portfolio.promotion_gate_id}.toml"
     )
+
+
+def _portfolio_tranche_count(
+    *,
+    portfolio: PortfolioRecipe,
+    artifacts: list[SleeveResearchArtifact],
+) -> int:
+    if not portfolio.rebalance_policy.startswith("staggered_"):
+        return 1
+
+    target_ids = sorted(
+        {
+            artifact.target_id
+            for artifact in artifacts
+            if artifact.sleeve_id in portfolio.sleeves
+        }
+    )
+    if not target_ids:
+        raise ValueError(
+            f"Staggered portfolio {portfolio.id} must bind at least one sleeve artifact."
+        )
+    if len(target_ids) > 1:
+        raise ValueError(
+            "Staggered portfolio sleeves must share one target_id; found: "
+            + ", ".join(target_ids)
+        )
+    target = load_target(CONFIG_ROOT / "targets" / f"{target_ids[0]}.toml")
+    return tranche_count_for_policy(
+        rebalance_policy=portfolio.rebalance_policy,
+        horizon_days=target.horizon_days,
+    )
+
+
+def _load_corporate_action_exception_windows(
+    source_db_path: Path | str,
+) -> list[CorporateActionExceptionWindow]:
+    import duckdb
+
+    target = _resolve_project_path(source_db_path)
+    conn = duckdb.connect(str(target), read_only=True)
+    try:
+        if not _table_exists(conn, "corporate_action_exception_ledger"):
+            return []
+        columns = {
+            str(row[1])
+            for row in conn.execute(
+                "PRAGMA table_info('corporate_action_exception_ledger')"
+            ).fetchall()
+        }
+        required = {
+            "exception_id",
+            "security_id",
+            "previous_trade_date",
+            "trade_date",
+        }
+        if not required.issubset(columns):
+            return []
+        severity_sql = "severity" if "severity" in columns else "'' AS severity"
+        triage_sql = "triage_class" if "triage_class" in columns else "'' AS triage_class"
+        recommended_action_sql = (
+            "recommended_action"
+            if "recommended_action" in columns
+            else "'' AS recommended_action"
+        )
+        rows = conn.execute(
+            f"""
+            SELECT
+                exception_id,
+                security_id,
+                previous_trade_date,
+                trade_date,
+                {severity_sql},
+                {triage_sql},
+                {recommended_action_sql}
+            FROM corporate_action_exception_ledger
+            ORDER BY trade_date, security_id, exception_id
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return [
+        CorporateActionExceptionWindow(
+            exception_id=str(exception_id),
+            asset_id=str(security_id),
+            previous_trade_date=str(previous_trade_date),
+            trade_date=str(trade_date),
+            severity=str(severity or ""),
+            triage_class=str(triage_class or ""),
+            recommended_action=str(recommended_action or ""),
+        )
+        for (
+            exception_id,
+            security_id,
+            previous_trade_date,
+            trade_date,
+            severity,
+            triage_class,
+            recommended_action,
+        ) in rows
+    ]
+
+
+def _table_exists(conn: object, table_name: str) -> bool:
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM duckdb_tables()
+        WHERE table_name = ?
+        LIMIT 1
+        """,
+        [table_name],
+    ).fetchone()
+    return row is not None

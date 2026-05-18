@@ -1,0 +1,8 @@
+schema_version = 1
+artifact_type = "sleeve_artifact_build_case"
+
+case_id = "sector_gated_leader_pullback_v1_output_build"
+description = "Build the sector-gated leader pullback sleeve artifact from output/sector_gated_leader_pullback_v1_input.json."
+sleeve_path = "config/sleeves/sector_gated_leader_pullback_v1.toml"
+input_path = "output/sector_gated_leader_pullback_v1_input.json"
+output_path = "output/sector_gated_leader_pullback_v1_artifact.json"

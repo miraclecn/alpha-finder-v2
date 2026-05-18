@@ -57,7 +57,12 @@ For A-shares, the target must encode:
 - which costs and tradeability filters are applied
 - which benchmark or style exposures are removed before judging alpha
 
-That is why the first V2 targets are defined as `next-day-open` entry, `open-to-open` holding-period returns, net of A-share cash-equity cost assumptions, with residualization versus benchmark, industry, size, and beta.
+That is why the first V2 targets are defined as `next-day-open` entry and
+`open-to-open` holding-period returns, net of A-share cash-equity cost
+assumptions. Industry-relative scoring is enforced only when PIT industry
+labels are bound. Size and beta controls are planned/report-only until V2 has
+audited exposure snapshots or a risk-model estimator; they must not be claimed
+as enforced neutralization.
 
 The target is not complete until the system can resolve:
 
@@ -65,7 +70,8 @@ The target is not complete until the system can resolve:
 - the entry and exit trade offsets implied by the trading calendar
 - the versioned cost model used for label construction
 - the exact tradeability rules that can exclude an observation from training
-- the common return components removed before the sleeve is judged
+- the common return components that are actually available and removed before
+  the sleeve is judged
 
 In practice, V2 should build labels from `target + cost model + tradeability state + residual components`, not from the target TOML alone.
 

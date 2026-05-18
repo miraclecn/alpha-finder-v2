@@ -1,0 +1,14 @@
+schema_version = 1
+artifact_type = "benchmark_state_build_case"
+case_id = "csi800_benchmark_state_2020_20260428"
+description = "Build a PIT CSI 800 benchmark-state history artifact for the 2020 through April 2026 liquid-midcap validation window."
+source_db_path = "output/research_source.duckdb"
+output_path = "output/csi800_benchmark_state_history_2020_20260428.json"
+benchmark_id = "CSI 800"
+industry_schema = "sw2021_l1"
+start_date = "20200102"
+end_date = "20260428"
+weighting_method = "provider_weight"
+effective_time = "15:00:00+08:00"
+available_time = "15:30:00+08:00"
+

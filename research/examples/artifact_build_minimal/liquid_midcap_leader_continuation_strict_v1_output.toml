@@ -1,0 +1,8 @@
+schema_version = 1
+artifact_type = "sleeve_artifact_build_case"
+
+case_id = "liquid_midcap_leader_continuation_strict_v1_output_build"
+description = "Build the strict liquid-midcap leader continuation sleeve artifact from output/liquid_midcap_leader_continuation_strict_v1_input.json."
+sleeve_path = "config/sleeves/liquid_midcap_leader_continuation_strict_v1.toml"
+input_path = "output/liquid_midcap_leader_continuation_strict_v1_input.json"
+output_path = "output/liquid_midcap_leader_continuation_strict_v1_artifact.json"

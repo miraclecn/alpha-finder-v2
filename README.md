@@ -15,7 +15,9 @@ The first production target is deliberately narrow:
 - execution style: end-of-day research, next-day open execution
 - holdings: 15-30 names
 - cadence: weekly or 2-3 times per week
-- risk stance: industry and size controlled, turnover budgeted, A-share constraints explicit
+- risk stance: industry control is enforced where PIT industry data is bound;
+  size and beta controls are planned/report-only until audited exposure inputs
+  exist; turnover and A-share execution constraints are explicit
 
 ## Current Research Doctrine
 
@@ -40,6 +42,10 @@ When audited `industry_classification_pit` data is present in the research
 DuckDB, the trend input builder can now bind PIT industry labels directly.
 If a portfolio uses `benchmark_relative` industry caps, V2 now rejects sleeve
 signals with blank industry labels instead of silently treating them as valid.
+Current sleeve scoring can normalize scores within PIT industry groups, and
+rank-based sleeve weights respect configured per-name caps. Size and beta are
+not marked enforced in configs because this round deliberately does not add an
+optimizer or Barra-style risk exposure estimator.
 The research-source bootstrap can now also import audited PIT reference tables
 from a supplemental DuckDB, and V2 can build a formal
 `benchmark_state_history` artifact either from staged benchmark membership plus
@@ -64,6 +70,7 @@ tables remain honest.
 - `config/promotion_gates`: portfolio-level promotion criteria for sleeve admission
 - `config/decay_monitors`: versioned rules for post-promotion watch and retirement decisions
 - `docs/architecture`: system principles and operating model
+- `docs/status`: current project state and evidence summaries
 - `docs/data`: V2 data boundary and PIT audit rules
 - `docs/migration`: V1 to V2 boundary documents
 - `research/examples`: persisted replay and deployment cases plus sample sleeve, benchmark-state, and account-state artifacts
@@ -78,6 +85,11 @@ tables remain honest.
 - `tests`: config and loader verification
 
 ## Quick Start
+
+Local source-data packets are intentionally not versioned. Keep official
+provider files such as the Shenwan Excel/PDF exports under `docs/data/` on the
+local machine; git tracks the audit notes and code paths, not the binary data
+payloads.
 
 ```bash
 cd /home/nan/alpha-find-v2
@@ -105,6 +117,8 @@ PYTHONPATH=src python -m alpha_find_v2 build-trend-research-input --case researc
 PYTHONPATH=src python -m alpha_find_v2 build-sleeve-artifact --case research/examples/artifact_build_minimal/trend_leadership_core_output.toml
 PYTHONPATH=src python -m alpha_find_v2 build-sleeve-artifact --case research/examples/artifact_build_minimal/trend_resilience_core_output.toml
 PYTHONPATH=src python -m alpha_find_v2 run-promotion-replay --case research/examples/promotion_replay_real_output/replay_case.toml
+PYTHONPATH=src python -m alpha_find_v2 run-portfolio-backtest --case research/examples/deployment_minimal/trend_only_portfolio_backtest.toml
+PYTHONPATH=src python -m alpha_find_v2 run-portfolio-backtest --case research/examples/deployment_minimal/trend_live_candidate_portfolio_backtest.toml
 PYTHONPATH=src python -m alpha_find_v2 build-executable-signal --case research/examples/deployment_minimal/executable_signal_real_output_case.toml
 PYTHONPATH=src python -m alpha_find_v2 build-sleeve-artifact --case research/examples/artifact_build_minimal/fundamental_rerating_core.toml
 PYTHONPATH=src python -m alpha_find_v2 build-sleeve-artifact --case research/examples/artifact_build_minimal/trend_leadership_core.toml
@@ -126,19 +140,51 @@ Note:
 - `build-reference-staging-db` now stages official `index_weight` snapshots and
   SW2021 `index_member_all` history so the checked-in CSI 800 benchmark case can
   run with `provider_weight` and `sw2021_l1`.
+- `output/pit_reference_staging.duckdb` now records its staged PIT truth in
+  `reference_dataset_registry`, while `output/research_source.duckdb` records
+  the release-1 boundary contract in `data_spine_registry`,
+  `build_chain_registry`, and `data_boundary_registry`.
 - `research/examples/trend_input_build_minimal/trend_leadership_core.toml` now
   enables `cn_a_directional_open_lock`, so generated trend artifacts stop
   silently suppressing A-share open-limit trade blocks.
-- The current honest CSI 800 + `sw2021_l1` replay window begins on `2025-08-29`
-  because earlier benchmark constituents still have missing staged SW2021
-  classification coverage.
-- The real-output promotion replay lane now compares generated
-  `trend_leadership_core` and `trend_resilience_core` artifacts on that same
-  `2025-08-29+` weekly calendar instead of falling back to a synthetic second
-  sleeve artifact.
+- `run-promotion-replay` is a sleeve/portfolio candidate comparison tool. It
+  compounds artifact forward returns and is not a real tradeable equity curve.
+- `run-portfolio-backtest` is the daily portfolio-level proof lane before
+  shadow-live. It executes decision-date targets on the next trading day open,
+  uses raw unadjusted `daily_bar_pit` OHLC columns for fills and daily marks,
+  records orders/fills and blocked/partial trades, maintains a T+1
+  `available_shares` ledger, enforces `min_trade_weight`, and ignores sleeve
+  artifact `realized_return` for PnL. Backtest summaries now label the
+  portfolio return clock as next-open execution plus close marks and benchmark
+  active metrics as previous-close-to-current-close returns with previous
+  benchmark weights.
+- Revalidated on `2026-04-27`, the staged CSI 800 + `sw2021_l1` benchmark
+  constituent coverage now spans `2014-02-21` through `2026-04-23`.
+  `output/audits/sw_industry_pit_audit_20140221_20260423.json` reports
+  `2,364,800 / 2,364,800` staged constituent-days covered on both exclusive
+  and inclusive interval semantics.
+- A temporary full-window benchmark-state build over `2014-02-21` through
+  `2026-04-23` also succeeds with `2,956` trading steps and `800`
+  constituents per step, so the benchmark-state layer is no longer the
+  live-readiness history blocker.
+- The checked-in trend live-candidate chain now rebuilds on the widened
+  `2021-03-05` through `2026-04-23` input calendar. The replay validation window
+  ends at `2026-03-19` because the sleeve target exits at T+20. The attached
+  portfolio evidence is clean on data-quality blockers, but the strategy fails
+  finance-grade admission: the current overlay backtest has active IR `-1.33`,
+  active annualized return `-41.02%`, max drawdown `-89.20%`, and turnover
+  `73.20x`.
+- Beijing-board names are excluded from the live-tradable trend input.
+  `302132.SZ` is resolved through a narrow `security_code_alias_backfill` from
+  legacy `300114.SZ` industry intervals. `chinext` and `star` names remain in
+  the default universe; their `20%` price-limit regime is handled through
+  tradeability, cost, liquidity, concentration, and exposure controls.
 - `run-promotion-replay` now emits replay diagnostics for sleeve overlap,
   candidate-only contribution, concentration, and the best/worst incremental
   periods so portfolio tuning can be guided by economic evidence.
+- Current status is summarized in
+  `docs/status/project-current-state-2026-04-29.md`, and the forward work plan
+  is `docs/superpowers/plans/2026-04-29-professional-quant-roadmap.md`.
 
 ## Operating Principle
 

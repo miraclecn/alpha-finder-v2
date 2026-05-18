@@ -9,7 +9,7 @@ rebalance_frequency = "weekly"
 target_holding_days = 30
 turnover_budget = 0.10
 execution_rule = "next_day_open"
-neutralization = ["industry", "size", "beta"]
+neutralization = ["industry"]
 
 [construction]
 selection = "rank_then_cap_weight"

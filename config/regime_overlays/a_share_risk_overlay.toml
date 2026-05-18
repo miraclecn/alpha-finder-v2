@@ -1,0 +1,19 @@
+id = "a_share_risk_overlay"
+name = "A-Share Risk Overlay"
+mandate_id = "a_share_long_only_eod"
+benchmark = "CSI 800"
+description = "Portfolio-level exposure governor built only from green benchmark trend, breadth, dispersion, realized volatility, and price-limit stress inputs."
+required_inputs = [
+  "benchmark_trend",
+  "market_breadth",
+  "dispersion",
+  "realized_volatility",
+  "price_limit_stress",
+]
+stop_inputs = ["price_limit_stress"]
+allowed_states = ["normal", "de_risk", "cash_heavier"]
+de_risk_min_risk_off = 1
+cash_heavier_min_risk_off = 3
+normal_gross_exposure = 1.0
+de_risk_gross_exposure = 0.65
+cash_heavier_gross_exposure = 0.35

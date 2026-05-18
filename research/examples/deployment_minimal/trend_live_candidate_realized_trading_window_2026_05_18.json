@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "artifact_type": "realized_trading_window",
+  "run_id": "trend_live_candidate_next_open_2026_04_20",
+  "portfolio_id": "trend_live_candidate_portfolio_with_overlay",
+  "evaluation_date": "2026-05-18",
+  "window_label": "20d_realized",
+  "window_start_date": "2026-04-21",
+  "window_end_date": "2026-05-18",
+  "realized_execution_basis": "manual_next_open_writeback",
+  "realized_holdings": [
+    {
+      "asset_id": "BBB",
+      "weight": 0.18
+    },
+    {
+      "asset_id": "DDD",
+      "weight": 0.12
+    },
+    {
+      "asset_id": "EEE",
+      "weight": 0.05
+    }
+  ],
+  "realized_cost": {
+    "estimated_trading_cost": 0.0021,
+    "realized_trading_cost": 0.0026,
+    "slippage_bps": 16.0
+  },
+  "realized_portfolio_path": [
+    {
+      "trade_date": "2026-04-21",
+      "nav": 1.0
+    },
+    {
+      "trade_date": "2026-04-28",
+      "nav": 1.004
+    },
+    {
+      "trade_date": "2026-05-12",
+      "nav": 1.016
+    },
+    {
+      "trade_date": "2026-05-18",
+      "nav": 1.024
+    }
+  ],
+  "realized_summary": {
+    "periods": 20,
+    "average_return": 0.0013,
+    "volatility": 0.0091,
+    "ir": 0.49,
+    "tstat": 0.99,
+    "peak_to_trough_drawdown": 0.098,
+    "breadth": 3,
+    "average_turnover": 0.64,
+    "blocked_name_share": 0.12
+  }
+}

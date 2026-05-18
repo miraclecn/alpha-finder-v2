@@ -1,0 +1,23 @@
+schema_version = 1
+artifact_type = "regime_overlay_observation_build_case"
+
+case_id = "trend_live_candidate_overlay_observation_build"
+description = "Build a widened green-input regime overlay observation history for the frozen trend live candidate from PIT benchmark and daily-bar data."
+overlay_path = "config/regime_overlays/a_share_risk_overlay.toml"
+source_db_path = "output/research_source.duckdb"
+benchmark_state_path = "output/csi800_benchmark_state_history.json"
+trade_dates_artifact_path = "output/trend_leadership_core_artifact.json"
+output_path = "output/trend_live_candidate_overlay_observations.json"
+trend_short_lookback_days = 20
+trend_long_lookback_days = 60
+breadth_return_lookback_days = 20
+dispersion_return_lookback_days = 20
+realized_volatility_lookback_days = 20
+breadth_supportive_min = 0.60
+breadth_risk_off_max = 0.45
+dispersion_supportive_max = 0.10
+dispersion_risk_off_min = 0.18
+realized_volatility_supportive_max = 0.18
+realized_volatility_risk_off_min = 0.32
+price_limit_stress_supportive_max = 0.01
+price_limit_stress_risk_off_min = 0.03

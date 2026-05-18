@@ -1,7 +1,11 @@
 .pytest_cache/
 .venv/
+.omx/
 __pycache__/
 *.pyc
 build/
 dist/
 output/
+docs/data/*.xls
+docs/data/*.xlsx
+docs/data/*.pdf

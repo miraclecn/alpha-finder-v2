@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "artifact_type": "manual_execution_outcome",
+  "run_id": "trend_live_candidate_next_open_2026_04_20",
+  "package_id": "trend_live_candidate_portfolio_with_overlay:2026-04-20",
+  "portfolio_id": "trend_live_candidate_portfolio_with_overlay",
+  "execution_date": "2026-04-21",
+  "attempted_orders": [
+    {
+      "asset_id": "AAA",
+      "action": "sell",
+      "requested_delta_weight": -0.18,
+      "executed_delta_weight": -0.18,
+      "status": "filled",
+      "reason": ""
+    },
+    {
+      "asset_id": "DDD",
+      "action": "sell",
+      "requested_delta_weight": -0.12,
+      "executed_delta_weight": 0.0,
+      "status": "blocked",
+      "reason": "suspension"
+    },
+    {
+      "asset_id": "EEE",
+      "action": "buy",
+      "requested_delta_weight": 0.07,
+      "executed_delta_weight": 0.05,
+      "status": "partial_fill",
+      "reason": "liquidity_cap"
+    }
+  ],
+  "blocked_trades": [
+    {
+      "asset_id": "DDD",
+      "action": "sell",
+      "requested_delta_weight": -0.12,
+      "reason": "suspension"
+    }
+  ],
+  "manual_overrides": [
+    {
+      "asset_id": "EEE",
+      "override_type": "weight_adjustment",
+      "from_target_weight": 0.07,
+      "to_target_weight": 0.05,
+      "reason": "round_lot"
+    }
+  ],
+  "cash_drift_weight": 0.02,
+  "post_trade_holdings": [
+    {
+      "asset_id": "BBB",
+      "weight": 0.18
+    },
+    {
+      "asset_id": "DDD",
+      "weight": 0.12
+    },
+    {
+      "asset_id": "EEE",
+      "weight": 0.05
+    }
+  ],
+  "exception_reasons": [
+    "DDD suspension blocked exit",
+    "EEE round-lot adjustment"
+  ],
+  "notes": [
+    "post-close writeback completed"
+  ]
+}

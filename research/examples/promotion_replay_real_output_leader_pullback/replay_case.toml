@@ -1,0 +1,39 @@
+schema_version = 1
+artifact_type = "portfolio_promotion_replay_case"
+case_id = "leader_pullback_continuation_real_output_replay"
+description = "Replay the frozen trend-leadership sleeve against the new leader-pullback continuation sleeve using versioned output artifacts on the shared 2021-03-05+ decision calendar."
+baseline_portfolio_path = "research/examples/promotion_replay_real_output_leader_pullback/baseline_portfolio.toml"
+candidate_portfolio_path = "research/examples/promotion_replay_real_output_leader_pullback/candidate_portfolio.toml"
+default_cost_model_path = "config/cost_models/base_a_share_cash.toml"
+additional_cost_model_paths = [
+  "config/cost_models/high_a_share_cash.toml",
+]
+benchmark_state_path = "output/csi800_benchmark_state_history.json"
+artifact_paths = [
+  "output/trend_leadership_core_artifact.json",
+  "output/leader_pullback_continuation_v1_artifact.json",
+]
+periods_per_year = 26
+max_component_correlation = 0.60
+correlation_to_existing_portfolio = 0.55
+turnover_budget = 0.10
+market_data_source_db_path = "output/research_source.duckdb"
+market_data_quality_audit_path = "output/audits/market_data_quality_20260429.json"
+
+[[walk_forward_splits]]
+split_id = "anchor_20210305"
+start_trade_date = "20210305"
+
+[[walk_forward_splits]]
+split_id = "anchor_20230109"
+start_trade_date = "20230109"
+
+[[walk_forward_splits]]
+split_id = "anchor_20250102"
+start_trade_date = "20250102"
+
+[cost_scenario_pass]
+base = true
+
+[regime_pass]
+bull = true

@@ -1,5 +1,8 @@
-import unittest
+import json
 from pathlib import Path
+import subprocess
+import tempfile
+import unittest
 
 from alpha_find_v2.deployment import DecayMonitorEvaluator, ExecutableSignalBuilder
 from alpha_find_v2.deployment_loader import (
@@ -14,6 +17,56 @@ EXAMPLE_ROOT = PROJECT_ROOT / "research" / "examples" / "deployment_minimal"
 
 
 class DeploymentLayerTest(unittest.TestCase):
+    def test_build_run_manifest_case_persists_execution_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest_path = Path(temp_dir) / "run_manifest.json"
+            case_text = (
+                (EXAMPLE_ROOT / "run_manifest_case.toml").read_text(encoding="utf-8").replace(
+                    "research/examples/deployment_minimal/run_manifest_2026_04_20.json",
+                    str(manifest_path),
+                )
+            )
+            case_path = Path(temp_dir) / "run_manifest_case.toml"
+            case_path.write_text(case_text, encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    "-m",
+                    "alpha_find_v2",
+                    "build-run-manifest",
+                    "--case",
+                    str(case_path),
+                ],
+                cwd=PROJECT_ROOT,
+                env={"PYTHONPATH": "src"},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["case_id"], "candidate_portfolio_run_manifest_2026_04_20")
+            self.assertEqual(payload["manifest"]["artifact_type"], "run_manifest")
+            self.assertEqual(payload["manifest"]["trade_date"], "2026-04-20")
+            self.assertEqual(payload["manifest"]["execution_date"], "2026-04-21")
+            self.assertEqual(payload["manifest"]["portfolio_id"], "research_example_candidate_portfolio")
+            self.assertEqual(payload["manifest"]["operator_id"], "nan")
+            self.assertEqual(
+                payload["manifest"]["sleeve_artifact_paths"],
+                [
+                    "research/examples/promotion_replay_minimal/sleeve_artifacts/fundamental_rerating_core.json",
+                    "research/examples/promotion_replay_minimal/sleeve_artifacts/trend_leadership_core.json",
+                ],
+            )
+            written_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(written_manifest["artifact_type"], "run_manifest")
+            self.assertEqual(
+                written_manifest["package_id"],
+                "research_example_candidate_portfolio:2026-04-20",
+            )
+
     def test_executable_signal_case_builds_next_open_package(self) -> None:
         loaded_case = load_executable_signal_case(EXAMPLE_ROOT / "executable_signal_case.toml")
 
@@ -28,6 +81,7 @@ class DeploymentLayerTest(unittest.TestCase):
             execution_policy=loaded_case.execution_policy,
             default_cost_model=loaded_case.default_cost_model,
             cost_models=loaded_case.cost_models,
+            portfolio_overlay=loaded_case.regime_overlay,
         ).build(
             trade_date=loaded_case.definition.trade_date,
             execution_date=loaded_case.definition.execution_date,
@@ -53,6 +107,40 @@ class DeploymentLayerTest(unittest.TestCase):
             instructions_by_asset["EEE"].executable_target_weight,
             instructions_by_asset["EEE"].proposed_target_weight,
         )
+
+    def test_executable_signal_case_carries_regime_overlay_decision(self) -> None:
+        loaded_case = load_executable_signal_case(
+            EXAMPLE_ROOT / "executable_signal_case_with_overlay.toml"
+        )
+
+        construction_step = PortfolioConstructor(
+            mandate=loaded_case.mandate,
+            portfolio=loaded_case.portfolio,
+            construction_model=loaded_case.construction_model,
+        ).build([loaded_case.construction_input]).steps[0]
+        package = ExecutableSignalBuilder(
+            mandate=loaded_case.mandate,
+            portfolio=loaded_case.portfolio,
+            execution_policy=loaded_case.execution_policy,
+            default_cost_model=loaded_case.default_cost_model,
+            cost_models=loaded_case.cost_models,
+            portfolio_overlay=loaded_case.regime_overlay,
+        ).build(
+            trade_date=loaded_case.definition.trade_date,
+            execution_date=loaded_case.definition.execution_date,
+            signals=construction_step.signals,
+            portfolio_state=loaded_case.portfolio_state,
+            regime_overlay_decision=loaded_case.regime_overlay_decision,
+        )
+
+        self.assertIsNotNone(loaded_case.regime_overlay_decision)
+        self.assertEqual(package.regime_overlay_status, "active")
+        self.assertEqual(package.regime_overlay_state, "cash_heavier")
+        self.assertEqual(package.regime_overlay_missing_inputs, [])
+        self.assertAlmostEqual(package.base_investable_budget, 0.98)
+        self.assertAlmostEqual(package.investable_budget, 0.343)
+        self.assertAlmostEqual(package.target_cash_weight, 0.657)
+        self.assertLess(package.cash_weight, package.target_cash_weight)
 
     def test_decay_watch_case_evaluates_to_healthy_record(self) -> None:
         loaded_case = load_decay_watch_case(EXAMPLE_ROOT / "decay_watch_case.toml")
@@ -98,6 +186,334 @@ class DeploymentLayerTest(unittest.TestCase):
         self.assertIn("max_drawdown_multiple", record.retirement_breaches)
         self.assertIn("max_turnover_vs_budget", record.retirement_breaches)
         self.assertIn("max_blocked_name_share", record.retirement_breaches)
+
+    def test_decay_watch_case_can_bind_realized_execution_trace(self) -> None:
+        loaded_case = load_decay_watch_case(
+            EXAMPLE_ROOT / "decay_watch_case_with_realized_window.toml"
+        )
+
+        self.assertEqual(loaded_case.realized_summary.periods, 20)
+        self.assertEqual(
+            getattr(getattr(loaded_case, "run_manifest", None), "run_id", ""),
+            "candidate_portfolio_next_open_2026_04_20",
+        )
+        self.assertEqual(
+            getattr(getattr(loaded_case, "manual_execution_outcome", None), "cash_drift_weight", -1.0),
+            0.02,
+        )
+        self.assertEqual(
+            getattr(
+                getattr(loaded_case, "realized_trading_window", None),
+                "realized_execution_basis",
+                "",
+            ),
+            "manual_next_open_writeback",
+        )
+
+    def test_cli_evaluate_decay_watch_reports_realized_execution_trace(self) -> None:
+        result = subprocess.run(
+            [
+                "python3",
+                "-m",
+                "alpha_find_v2",
+                "evaluate-decay-watch",
+                "--case",
+                str(EXAMPLE_ROOT / "decay_watch_case_with_realized_window.toml"),
+            ],
+            cwd=PROJECT_ROOT,
+            env={"PYTHONPATH": "src"},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["record"]["run_id"], "candidate_portfolio_next_open_2026_04_20")
+        self.assertEqual(payload["record"]["realized_execution_basis"], "manual_next_open_writeback")
+        self.assertEqual(payload["record"]["blocked_trade_count"], 1)
+        self.assertEqual(payload["record"]["manual_override_count"], 1)
+        self.assertAlmostEqual(payload["record"]["cash_drift_weight"], 0.02)
+        self.assertEqual(payload["record"]["exception_count"], 2)
+
+    def test_cli_build_executable_signal_allows_live_candidate_with_passing_multi_year_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            audit_path = temp_root / "multi_year_audit.json"
+            bundle_path = temp_root / "live_candidate.toml"
+            case_path = temp_root / "executable_signal_case.toml"
+
+            self._write_clean_multi_year_audit(audit_path)
+            self._write_bundle_with_audit(bundle_path, audit_path)
+            case_text = (
+                (
+                    EXAMPLE_ROOT
+                    / "executable_signal_case_trend_live_candidate_with_overlay.toml"
+                )
+                .read_text(encoding="utf-8")
+                .replace(
+                    "research/examples/deployment_minimal/trend_leadership_live_candidate_v1.toml",
+                    str(bundle_path),
+                )
+            )
+            case_path.write_text(case_text, encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    "-m",
+                    "alpha_find_v2",
+                    "build-executable-signal",
+                    "--case",
+                    str(case_path),
+                ],
+                cwd=PROJECT_ROOT,
+                env={"PYTHONPATH": "src"},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["case_id"], "trend_live_candidate_next_open_2026_04_20")
+        self.assertEqual(
+            payload["package"]["portfolio_id"],
+            "trend_live_candidate_portfolio_with_overlay",
+        )
+        self.assertEqual(payload["package"]["regime_overlay_state"], "cash_heavier")
+
+    def test_cli_build_executable_signal_blocks_current_failed_strategy_quality(
+        self,
+    ) -> None:
+        result = subprocess.run(
+            [
+                "python3",
+                "-m",
+                "alpha_find_v2",
+                "build-executable-signal",
+                "--case",
+                str(
+                    EXAMPLE_ROOT
+                    / "executable_signal_case_trend_live_candidate_with_overlay.toml"
+                ),
+            ],
+            cwd=PROJECT_ROOT,
+            env={"PYTHONPATH": "src"},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("strategy_active_backtest_ir", result.stderr)
+        self.assertIn("strategy_max_drawdown", result.stderr)
+        self.assertIn("strategy_turnover", result.stderr)
+
+    def test_cli_build_run_manifest_allows_live_candidate_with_passing_multi_year_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            manifest_path = temp_root / "trend_live_candidate_run_manifest.json"
+            audit_path = temp_root / "multi_year_audit.json"
+            bundle_path = temp_root / "live_candidate.toml"
+            executable_case_path = temp_root / "executable_signal_case.toml"
+            self._write_clean_multi_year_audit(audit_path)
+            self._write_bundle_with_audit(bundle_path, audit_path)
+            executable_case_text = (
+                (
+                    EXAMPLE_ROOT
+                    / "executable_signal_case_trend_live_candidate_with_overlay.toml"
+                )
+                .read_text(encoding="utf-8")
+                .replace(
+                    "research/examples/deployment_minimal/trend_leadership_live_candidate_v1.toml",
+                    str(bundle_path),
+                )
+            )
+            executable_case_path.write_text(executable_case_text, encoding="utf-8")
+            case_text = (
+                (EXAMPLE_ROOT / "run_manifest_case_trend_live_candidate_2026_04_20.toml")
+                .read_text(encoding="utf-8")
+                .replace(
+                    "research/examples/deployment_minimal/executable_signal_case_trend_live_candidate_with_overlay.toml",
+                    str(executable_case_path),
+                )
+                .replace(
+                    "research/examples/deployment_minimal/trend_live_candidate_run_manifest_2026_04_20.json",
+                    str(manifest_path),
+                )
+            )
+            case_path = temp_root / "run_manifest_case.toml"
+            case_path.write_text(case_text, encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    "-m",
+                    "alpha_find_v2",
+                    "build-run-manifest",
+                    "--case",
+                    str(case_path),
+                ],
+                cwd=PROJECT_ROOT,
+                env={"PYTHONPATH": "src"},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["case_id"], "trend_live_candidate_run_manifest_2026_04_20")
+            self.assertEqual(payload["output_path"], str(manifest_path))
+            written_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                written_manifest["portfolio_id"],
+                "trend_live_candidate_portfolio_with_overlay",
+            )
+            self.assertEqual(written_manifest["regime_overlay_state"], "cash_heavier")
+
+    def test_cli_build_run_manifest_blocks_current_failed_strategy_quality(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest_path = Path(temp_dir) / "trend_live_candidate_run_manifest.json"
+            case_text = (
+                (EXAMPLE_ROOT / "run_manifest_case_trend_live_candidate_2026_04_20.toml")
+                .read_text(encoding="utf-8")
+                .replace(
+                    "research/examples/deployment_minimal/trend_live_candidate_run_manifest_2026_04_20.json",
+                    str(manifest_path),
+                )
+            )
+            case_path = Path(temp_dir) / "run_manifest_case.toml"
+            case_path.write_text(case_text, encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    "-m",
+                    "alpha_find_v2",
+                    "build-run-manifest",
+                    "--case",
+                    str(case_path),
+                ],
+                cwd=PROJECT_ROOT,
+                env={"PYTHONPATH": "src"},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("strategy_active_backtest_ir", result.stderr)
+        self.assertIn("strategy_max_drawdown", result.stderr)
+        self.assertIn("strategy_turnover", result.stderr)
+
+    def test_cli_build_executable_signal_blocks_live_candidate_with_exception_exposure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            audit_path = temp_root / "multi_year_audit.json"
+            bundle_path = temp_root / "live_candidate.toml"
+            case_path = temp_root / "executable_signal_case.toml"
+
+            audit_payload = json.loads(
+                (
+                    EXAMPLE_ROOT / "trend_leadership_multi_year_validation_audit_v1.json"
+                ).read_text(encoding="utf-8")
+            )
+            audit_payload["portfolio_evidence_complete"] = True
+            audit_payload["qfq_fallback_price_exposure_count"] = 0
+            audit_payload["tradeability_fallback_exposure_count"] = 0
+            audit_payload["market_data_fallback_exposure_count"] = 0
+            audit_payload["corporate_action_exception_exposure_count"] = 1
+            audit_payload["corporate_action_exception_exposures"] = [
+                {
+                    "portfolio_id": "trend_live_candidate_portfolio_with_overlay",
+                    "asset_id": "000008.SZ",
+                    "exception_trade_date": "20150924",
+                    "replay_trade_date": "20150918",
+                    "severity": "critical",
+                    "triage_class": "daily_pre_close_ex_right_without_ledger",
+                }
+            ]
+            audit_path.write_text(
+                json.dumps(audit_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            bundle_text = (
+                (EXAMPLE_ROOT / "trend_leadership_live_candidate_v1.toml")
+                .read_text(encoding="utf-8")
+                .replace(
+                    "research/examples/deployment_minimal/trend_leadership_multi_year_validation_audit_v1.json",
+                    str(audit_path),
+                )
+            )
+            bundle_path.write_text(bundle_text, encoding="utf-8")
+
+            case_text = (
+                (
+                    EXAMPLE_ROOT
+                    / "executable_signal_case_trend_live_candidate_with_overlay.toml"
+                )
+                .read_text(encoding="utf-8")
+                .replace(
+                    "research/examples/deployment_minimal/trend_leadership_live_candidate_v1.toml",
+                    str(bundle_path),
+                )
+            )
+            case_path.write_text(case_text, encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    "-m",
+                    "alpha_find_v2",
+                    "build-executable-signal",
+                    "--case",
+                    str(case_path),
+                ],
+                cwd=PROJECT_ROOT,
+                env={"PYTHONPATH": "src"},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("corporate_action_exception_exposure", result.stderr)
+
+    def _write_clean_multi_year_audit(self, path: Path) -> None:
+        audit_payload = json.loads(
+            (EXAMPLE_ROOT / "trend_leadership_multi_year_validation_audit_v1.json")
+            .read_text(encoding="utf-8")
+        )
+        audit_payload["portfolio_evidence_complete"] = True
+        audit_payload["corporate_action_exception_exposure_count"] = 0
+        audit_payload["corporate_action_exception_exposures"] = []
+        audit_payload["qfq_fallback_price_exposure_count"] = 0
+        audit_payload["tradeability_fallback_exposure_count"] = 0
+        audit_payload["market_data_fallback_exposure_count"] = 0
+        audit_payload["active_backtest_information_ratio"] = 0.42
+        audit_payload["active_backtest_max_drawdown"] = -0.09
+        audit_payload["active_backtest_turnover"] = 4.0
+        audit_payload["strategy_min_active_ir"] = 0.30
+        audit_payload["strategy_max_drawdown"] = 0.18
+        audit_payload["strategy_max_turnover"] = 42.0
+        path.write_text(
+            json.dumps(audit_payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+    def _write_bundle_with_audit(self, path: Path, audit_path: Path) -> None:
+        bundle_text = (
+            (EXAMPLE_ROOT / "trend_leadership_live_candidate_v1.toml")
+            .read_text(encoding="utf-8")
+            .replace(
+                "research/examples/deployment_minimal/trend_leadership_multi_year_validation_audit_v1.json",
+                str(audit_path),
+            )
+        )
+        path.write_text(bundle_text, encoding="utf-8")
 
 
 if __name__ == "__main__":

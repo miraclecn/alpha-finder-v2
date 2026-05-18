@@ -4,6 +4,8 @@ import subprocess
 import tempfile
 import unittest
 
+import duckdb
+
 from alpha_find_v2.config_loader import CONFIG_ROOT
 from alpha_find_v2.deployment_loader import load_portfolio_state_snapshot
 from alpha_find_v2.live_state import (
@@ -111,6 +113,30 @@ class ResearchArtifactLoaderTest(unittest.TestCase):
         self.assertGreater(result.marginal.marginal_ir_delta, 0.0)
         self.assertIsNotNone(result.regime_breakdown)
 
+    def test_replay_case_can_bind_regime_overlay_evidence(self) -> None:
+        loaded_case = load_portfolio_promotion_replay_case(
+            EXAMPLE_ROOT / "replay_case_with_overlay.toml"
+        )
+
+        replay = PortfolioPromotionReplay(
+            mandate=loaded_case.mandate,
+            construction_model=loaded_case.construction_model,
+            default_cost_model=loaded_case.default_cost_model,
+            gate=loaded_case.gate,
+            cost_models=loaded_case.cost_models,
+        )
+        result = replay.replay(loaded_case.replay_input)
+
+        self.assertIsNotNone(loaded_case.regime_overlay)
+        self.assertIsNotNone(result.regime_overlay)
+        assert result.regime_overlay is not None
+        self.assertEqual(
+            [decision.state for decision in result.regime_overlay.decisions],
+            ["normal", "de_risk", "cash_heavier"],
+        )
+        self.assertEqual(result.regime_overlay.summary.blocked_periods, 0)
+        self.assertIn("regime_overlay_complete", result.decision.passed_checks)
+
     def test_cli_run_promotion_replay_separates_research_evidence_from_gate_output(self) -> None:
         result = subprocess.run(
             [
@@ -140,7 +166,9 @@ class ResearchArtifactLoaderTest(unittest.TestCase):
                 "candidate_summary",
                 "diagnostics",
                 "marginal",
+                "market_data_quality",
                 "regime_breakdown",
+                "regime_overlay",
                 "walk_forward",
             ],
         )
@@ -185,6 +213,71 @@ class ResearchArtifactLoaderTest(unittest.TestCase):
             [split.start_trade_date for split in loaded_case.replay_input.walk_forward_splits],
             ["2026-04-06", "2026-04-13"],
         )
+
+    def test_load_portfolio_promotion_replay_case_reads_exception_windows_from_source_db(self) -> None:
+        case_text = (EXAMPLE_ROOT / "replay_case.toml").read_text(
+            encoding="utf-8"
+        ).replace(
+            "[cost_scenario_pass]",
+            'market_data_source_db_path = "{db_path}"\n'
+            'market_data_quality_audit_path = "output/audits/market_data_quality_20260429.json"\n\n'
+            "[cost_scenario_pass]",
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            db_path = temp_root / "research_source.duckdb"
+            conn = duckdb.connect(str(db_path))
+            try:
+                conn.execute(
+                    """
+                    CREATE TABLE corporate_action_exception_ledger (
+                        exception_id VARCHAR,
+                        security_id VARCHAR,
+                        previous_trade_date VARCHAR,
+                        trade_date VARCHAR,
+                        severity VARCHAR,
+                        triage_class VARCHAR,
+                        recommended_action VARCHAR
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO corporate_action_exception_ledger VALUES
+                    (
+                        'DDD:20260409:20260410',
+                        'DDD',
+                        '20260409',
+                        '20260410',
+                        'critical',
+                        'daily_pre_close_ex_right_without_ledger',
+                        'quarantine_security_window_from_promotion'
+                    )
+                    """
+                )
+            finally:
+                conn.close()
+            case_path = temp_root / "replay_case.toml"
+            case_path.write_text(
+                case_text.format(db_path=db_path),
+                encoding="utf-8",
+            )
+
+            loaded_case = load_portfolio_promotion_replay_case(case_path)
+
+        self.assertEqual(
+            loaded_case.definition.market_data_quality_audit_path,
+            "output/audits/market_data_quality_20260429.json",
+        )
+        self.assertEqual(
+            len(loaded_case.replay_input.corporate_action_exception_windows),
+            1,
+        )
+        exception = loaded_case.replay_input.corporate_action_exception_windows[0]
+        self.assertEqual(exception.exception_id, "DDD:20260409:20260410")
+        self.assertEqual(exception.asset_id, "DDD")
+        self.assertEqual(exception.trade_date, "20260410")
 
     def test_load_portfolio_promotion_replay_case_rejects_mixed_target_ids(self) -> None:
         baseline_portfolio = """id = "mixed_target_baseline"
@@ -258,6 +351,65 @@ max_industry_overweight = 0.30
 
             with self.assertRaisesRegex(ValueError, "must share the same target_id"):
                 load_portfolio_promotion_replay_case(case_path)
+
+    def test_load_portfolio_promotion_replay_case_infers_staggered_tranche_counts(self) -> None:
+        portfolio_text = """id = "staggered_weekly_portfolio"
+name = "Staggered Weekly Portfolio"
+mandate_id = "a_share_long_only_eod"
+benchmark = "CSI 800"
+rebalance_policy = "staggered_weekly"
+description = "Synthetic staggered portfolio for loader validation."
+construction_model_id = "a_share_core_blend"
+promotion_gate_id = "research_example_replay_gate"
+execution_policy_id = "a_share_next_open_v1"
+decay_monitor_id = "a_share_core_watch"
+sleeves = ["fundamental_rerating_core"]
+
+[allocation]
+fundamental_rerating_core = 1.0
+
+[constraints]
+max_names = 4
+max_single_name_weight = 0.60
+max_industry_overweight = 0.30
+"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            baseline_path = temp_root / "baseline.toml"
+            baseline_path.write_text(portfolio_text, encoding="utf-8")
+            candidate_path = temp_root / "candidate.toml"
+            candidate_path.write_text(
+                portfolio_text.replace(
+                    'id = "staggered_weekly_portfolio"',
+                    'id = "staggered_weekly_candidate"',
+                ),
+                encoding="utf-8",
+            )
+            case_path = temp_root / "replay_case.toml"
+            case_path.write_text(
+                "\n".join(
+                    [
+                        'schema_version = 1',
+                        'artifact_type = "portfolio_promotion_replay_case"',
+                        'case_id = "staggered_weekly_validation"',
+                        'description = "Infer tranche counts from staggered policy and target horizon."',
+                        f'baseline_portfolio_path = "{baseline_path}"',
+                        f'candidate_portfolio_path = "{candidate_path}"',
+                        f'default_cost_model_path = "{CONFIG_ROOT / "cost_models" / "base_a_share_cash.toml"}"',
+                        f'benchmark_state_path = "{EXAMPLE_ROOT / "benchmark_state_history.json"}"',
+                        'artifact_paths = [',
+                        f'  "{EXAMPLE_ROOT / "sleeve_artifacts" / "fundamental_rerating_core.json"}",',
+                        ']',
+                        'periods_per_year = 52',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            loaded_case = load_portfolio_promotion_replay_case(case_path)
+
+        self.assertEqual(loaded_case.replay_input.baseline_tranche_count, 4)
+        self.assertEqual(loaded_case.replay_input.candidate_tranche_count, 4)
 
     def test_load_sleeve_artifact_rejects_unknown_schema_version(self) -> None:
         payload = {
