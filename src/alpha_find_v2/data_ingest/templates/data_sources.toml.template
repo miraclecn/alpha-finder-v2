@@ -1,0 +1,119 @@
+schema_version = 1
+
+# ---------------------------------------------------------------------------
+# Adapter configuration
+# ---------------------------------------------------------------------------
+
+[adapter.tushare]
+enabled = true
+calls_per_minute = 490   # leave headroom under Tushare 500/min cap
+calls_per_day = 0        # 0 = unlimited
+
+[adapter.akshare]
+enabled = true           # free fallback for daily/index_daily only
+calls_per_minute = 60
+
+[adapter.baostock]
+enabled = false          # disabled by default; free fallback for daily only
+calls_per_minute = 60
+
+# ---------------------------------------------------------------------------
+# Dataset configuration
+# Each entry: enabled, credit_tier, priority (adapter names in fallback order)
+# ---------------------------------------------------------------------------
+
+[datasets.stock_basic]
+enabled = true
+credit_tier = 120
+priority = ["tushare"]
+
+[datasets.trade_cal]
+enabled = true
+credit_tier = 120
+priority = ["tushare"]
+
+[datasets.namechange]
+enabled = true
+credit_tier = 120
+priority = ["tushare"]
+
+[datasets.daily]
+enabled = true
+credit_tier = 120
+priority = ["tushare", "akshare", "baostock"]
+
+[datasets.daily_basic]
+enabled = true
+credit_tier = 120
+priority = ["tushare"]
+
+[datasets.adj_factor]
+enabled = true
+credit_tier = 2000
+priority = ["tushare"]
+
+[datasets.daily_qfq]
+enabled = true
+credit_tier = 2000
+priority = ["tushare", "akshare", "baostock"]
+
+[datasets.suspend_d]
+enabled = true
+credit_tier = 2000
+priority = ["tushare"]
+
+[datasets.stk_limit]
+enabled = true
+credit_tier = 2000
+priority = ["tushare"]
+
+[datasets.index_daily]
+enabled = true
+credit_tier = 2000
+priority = ["tushare", "akshare"]
+
+[datasets.index_weight]
+enabled = true
+credit_tier = 2000
+priority = ["tushare"]
+
+[datasets.index_member_all]
+enabled = true
+credit_tier = 2000
+priority = ["tushare"]
+
+# ---------------------------------------------------------------------------
+# 5000-credit datasets — disabled by default
+# Set enabled = true after upgrading your Tushare account to 5000 credits.
+# See https://tushare.pro/user/credits for credit upgrade options.
+# ---------------------------------------------------------------------------
+
+[datasets.fina_indicator]
+enabled = false   # requires 5000 Tushare credits
+credit_tier = 5000
+priority = ["tushare"]
+
+[datasets.income]
+enabled = false   # requires 5000 Tushare credits
+credit_tier = 5000
+priority = ["tushare"]
+
+[datasets.balancesheet]
+enabled = false   # requires 5000 Tushare credits
+credit_tier = 5000
+priority = ["tushare"]
+
+[datasets.cashflow]
+enabled = false   # requires 5000 Tushare credits
+credit_tier = 5000
+priority = ["tushare"]
+
+[datasets.forecast]
+enabled = false   # requires 5000 Tushare credits
+credit_tier = 5000
+priority = ["tushare"]
+
+[datasets.express]
+enabled = false   # requires 5000 Tushare credits
+credit_tier = 5000
+priority = ["tushare"]
