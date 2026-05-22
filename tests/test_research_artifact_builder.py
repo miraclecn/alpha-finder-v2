@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 import subprocess
 import tempfile
+import os
+import sys
 import unittest
 
 from alpha_find_v2.research_artifact_builder import build_sleeve_artifact, write_sleeve_artifact
@@ -86,8 +88,8 @@ class SleeveArtifactBuilderTest(unittest.TestCase):
                         'case_id = "trend_leadership_build_case"',
                         'description = "Build a sleeve artifact from normalized research observations."',
                         'sleeve_path = "config/sleeves/fundamental_rerating_core.toml"',
-                        f'input_path = "{input_path}"',
-                        f'output_path = "{output_path}"',
+                        f'input_path = "{input_path.as_posix()}"',
+                        f'output_path = "{output_path.as_posix()}"',
                         "",
                     ]
                 ),
@@ -157,8 +159,8 @@ class SleeveArtifactBuilderTest(unittest.TestCase):
                         'case_id = "trend_leadership_build_case"',
                         'description = "Build a sleeve artifact from normalized research observations."',
                         'sleeve_path = "config/sleeves/trend_leadership_core.toml"',
-                        f'input_path = "{input_path}"',
-                        f'output_path = "{output_path}"',
+                        f'input_path = "{input_path.as_posix()}"',
+                        f'output_path = "{output_path.as_posix()}"',
                         "",
                     ]
                 ),
@@ -229,8 +231,8 @@ class SleeveArtifactBuilderTest(unittest.TestCase):
                         'case_id = "trend_leadership_build_case"',
                         'description = "Build a sleeve artifact from normalized research observations."',
                         'sleeve_path = "config/sleeves/trend_leadership_core.toml"',
-                        f'input_path = "{input_path}"',
-                        f'output_path = "{output_path}"',
+                        f'input_path = "{input_path.as_posix()}"',
+                        f'output_path = "{output_path.as_posix()}"',
                         "",
                     ]
                 ),
@@ -239,7 +241,7 @@ class SleeveArtifactBuilderTest(unittest.TestCase):
 
             result = subprocess.run(
                 [
-                    "python3",
+                    sys.executable,
                     "-m",
                     "alpha_find_v2",
                     "build-sleeve-artifact",
@@ -247,7 +249,7 @@ class SleeveArtifactBuilderTest(unittest.TestCase):
                     str(case_path),
                 ],
                 cwd=Path(__file__).resolve().parents[1],
-                env={"PYTHONPATH": "src"},
+                env={**os.environ, "PYTHONPATH": "src"},
                 capture_output=True,
                 text=True,
                 check=False,

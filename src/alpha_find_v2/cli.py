@@ -4,6 +4,7 @@ import argparse
 from dataclasses import asdict
 from datetime import date
 import json
+import sys
 from pathlib import Path
 
 from .config_loader import (
@@ -396,6 +397,158 @@ def _parse_args() -> argparse.Namespace:
         help="Path to the decay-watch case TOML file.",
     )
 
+    # ---- Data ingestion commands ----------------------------------------
+
+    init_cmd = subparsers.add_parser(
+        "init",
+        help="Initialise the workspace: create .env, config/data_sources.toml, output/.",
+    )
+    init_cmd.add_argument(
+        "--workspace",
+        default=".",
+        help="Workspace root directory (default: current directory).",
+    )
+
+    sync_cmd = subparsers.add_parser(
+        "sync",
+        help="Sync A-share data from Tushare (or fallback) into output/raw.duckdb.",
+    )
+    sync_cmd.add_argument(
+        "--raw-db",
+        default="output/raw.duckdb",
+        help="Path to the raw DuckDB file (created if absent).",
+    )
+    sync_cmd.add_argument(
+        "--config",
+        default="config/data_sources.toml",
+        help="Path to data_sources.toml.",
+    )
+    sync_cmd.add_argument(
+        "--only",
+        default="",
+        help="Comma-separated dataset ids to sync (default: all enabled).",
+    )
+    sync_cmd.add_argument(
+        "--reset",
+        default="",
+        help="Comma-separated dataset ids to reset (clear state + raw table) before sync.",
+    )
+    sync_cmd.add_argument(
+        "--since",
+        default="",
+        help="Override start date YYYYMMDD.",
+    )
+    sync_cmd.add_argument(
+        "--until",
+        default="",
+        help="End date YYYYMMDD (default: today).",
+    )
+    sync_cmd.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="Plan sync without making any API calls.",
+    )
+
+    audit_cmd = subparsers.add_parser(
+        "audit-data",
+        help="Run data quality checks on output/raw.duckdb.",
+    )
+    audit_cmd.add_argument(
+        "--raw-db",
+        default="output/raw.duckdb",
+        help="Path to the raw DuckDB file.",
+    )
+    audit_cmd.add_argument(
+        "--out-dir",
+        default="output/audit",
+        help="Directory for audit reports.",
+    )
+
+    # ---- Factor evaluation commands (Stage 2) ---------------------------
+
+    compute_desc_cmd = subparsers.add_parser(
+        "compute-descriptor",
+        help="Compute descriptor values from the research database.",
+    )
+    compute_desc_cmd.add_argument("--id", required=True, help="Descriptor id.")
+    compute_desc_cmd.add_argument(
+        "--research-db", default="output/research_source.duckdb",
+        help="Path to research_source.duckdb.",
+    )
+    compute_desc_cmd.add_argument("--start", default="", help="Start date YYYYMMDD.")
+    compute_desc_cmd.add_argument("--end", default="", help="End date YYYYMMDD.")
+    compute_desc_cmd.add_argument("--out", default="", help="Optional output Parquet path.")
+    compute_desc_cmd.add_argument("--universe", default="", help="Optional universe filter id.")
+
+    evaluate_desc_cmd = subparsers.add_parser(
+        "evaluate-descriptor",
+        help="Evaluate a descriptor with IC, decile, and other metrics.",
+    )
+    evaluate_desc_cmd.add_argument("--id", required=True, help="Descriptor id.")
+    evaluate_desc_cmd.add_argument(
+        "--research-db", default="output/research_source.duckdb",
+        help="Path to research_source.duckdb.",
+    )
+    evaluate_desc_cmd.add_argument("--raw-db", default="output/raw.duckdb",
+                                   help="Path to raw.duckdb (for tradeability).")
+    evaluate_desc_cmd.add_argument("--universe", default="csi800",
+                                   help="Universe id: csi800 | investable_a_share_core.")
+    evaluate_desc_cmd.add_argument("--start", default="", help="Start date YYYYMMDD.")
+    evaluate_desc_cmd.add_argument("--end", default="", help="End date YYYYMMDD.")
+    evaluate_desc_cmd.add_argument("--horizons", default="5,20,60",
+                                   help="Comma-separated horizon days.")
+    evaluate_desc_cmd.add_argument("--primary-horizon", type=int, default=20,
+                                   help="Primary horizon for summary (default 20).")
+    evaluate_desc_cmd.add_argument("--correlation-against", default="",
+                                   help="Comma-separated descriptor ids for correlation.")
+    evaluate_desc_cmd.add_argument("--cost-model", default="",
+                                   help="Path to cost model TOML.")
+    evaluate_desc_cmd.add_argument("--weighting", default="equal",
+                                   choices=["equal", "rank"])
+    evaluate_desc_cmd.add_argument("--include-untradeable", action="store_true",
+                                   default=False)
+    evaluate_desc_cmd.add_argument(
+        "--out-dir", default="output/descriptor_evaluation",
+        help="Directory for evaluation reports.",
+    )
+
+    list_reports_cmd = subparsers.add_parser(
+        "list-evaluation-reports",
+        help="List past descriptor evaluation reports.",
+    )
+    list_reports_cmd.add_argument("--id", default="", help="Filter to a specific descriptor id.")
+    list_reports_cmd.add_argument(
+        "--out-dir", default="output/descriptor_evaluation",
+        help="Directory containing evaluation reports.",
+    )
+
+    # ---- Factor mining commands (Stage 3) ---------------------------
+
+    mine_factors_cmd = subparsers.add_parser(
+        "mine-factors",
+        help="Run a factor mining session and produce a candidate run directory.",
+    )
+    mine_factors_cmd.add_argument("--research-db", required=True, help="Path to research_source.duckdb.")
+    mine_factors_cmd.add_argument("--start", required=True, help="Start date YYYYMMDD.")
+    mine_factors_cmd.add_argument("--end", required=True, help="End date YYYYMMDD.")
+    mine_factors_cmd.add_argument("--config", required=True, help="Path to mining config TOML.")
+
+    list_candidates_cmd = subparsers.add_parser(
+        "list-factor-candidates",
+        help="List past factor mining runs from the registry.",
+    )
+    list_candidates_cmd.add_argument("--family", default="", help="Filter by family (case-sensitive).")
+    list_candidates_cmd.add_argument("--min-ic-ir", type=float, default=None, help="Filter by minimum mean OOS IC_IR.")
+
+    inspect_cmd = subparsers.add_parser(
+        "inspect-candidate",
+        help="Run a full Stage 2 evaluation on a sandbox candidate.",
+    )
+    inspect_cmd.add_argument("run_id", help="Run id (directory name under output/factor_lab/runs/).")
+    inspect_cmd.add_argument("expr_id", help="Candidate expr_id from candidates.jsonl.")
+    inspect_cmd.add_argument("--research-db", default="output/research_source.duckdb", help="Path to research_source.duckdb.")
+
     return parser.parse_args()
 
 
@@ -715,6 +868,190 @@ def main() -> None:
                 "description": loaded_case.definition.description,
                 "record": asdict(record),
             }
+        )
+        return
+
+    if args.command == "init":
+        from .data_ingest.init_workspace import init_workspace as _init_workspace
+        report = _init_workspace(Path(args.workspace))
+        _dump_json(
+            {
+                "workspace": str(report.workspace),
+                "actions": [
+                    {"path": str(a.path), "action": a.action}
+                    for a in report.actions
+                ],
+            }
+        )
+        return
+
+    if args.command == "sync":
+        import sys as _sys
+        from .data_ingest.config_models import load_data_sources_config
+        from .data_ingest.orchestrator import sync as _sync
+        from .data_ingest.adapters.tushare_adapter import TushareAdapter
+        from .data_ingest.adapters.akshare_adapter import AKShareAdapter
+        from .data_ingest.adapters.baostock_adapter import BaostockAdapter
+
+        config_path = Path(args.config)
+        if not config_path.exists():
+            _dump_json({"error": f"Config not found: {config_path}. Run 'alpha-find-v2 init' first."})
+            _sys.exit(2)
+            return
+
+        config = load_data_sources_config(config_path)
+
+        # Build adapter map from enabled adapters in config
+        adapter_map = {}
+        if config.adapters.get("tushare", None) and config.adapters["tushare"].enabled:
+            try:
+                from .data_ingest.adapters.tushare_adapter import TushareAdapter
+                adapter_map["tushare"] = TushareAdapter()
+            except (ImportError, Exception) as exc:
+                print(f"[WARN] Could not initialise TushareAdapter: {exc}", file=_sys.stderr)
+        if config.adapters.get("akshare", None) and config.adapters["akshare"].enabled:
+            try:
+                from .data_ingest.adapters.akshare_adapter import AKShareAdapter
+                adapter_map["akshare"] = AKShareAdapter()
+            except (ImportError, Exception) as exc:
+                print(f"[WARN] Could not initialise AKShareAdapter: {exc}", file=_sys.stderr)
+        if config.adapters.get("baostock", None) and config.adapters["baostock"].enabled:
+            try:
+                from .data_ingest.adapters.baostock_adapter import BaostockAdapter
+                adapter_map["baostock"] = BaostockAdapter()
+            except (ImportError, Exception) as exc:
+                print(f"[WARN] Could not initialise BaostockAdapter: {exc}", file=_sys.stderr)
+
+        report = _sync(
+            raw_db_path=Path(args.raw_db),
+            config=config,
+            adapter_map=adapter_map,
+            only=set(args.only.split(",")) if args.only else None,
+            reset=set(args.reset.split(",")) if args.reset else None,
+            since=args.since or None,
+            until=args.until or None,
+            dry_run=args.dry_run,
+        )
+
+        failed = report.failed_count()
+        if failed:
+            print(
+                f"[WARN] {failed} dataset(s) failed to sync. See results for details.",
+                file=_sys.stderr,
+            )
+
+        _dump_json(
+            {
+                "raw_db_path": report.raw_db_path,
+                "started_at": report.started_at,
+                "finished_at": report.finished_at,
+                "success_count": report.success_count(),
+                "failed_count": report.failed_count(),
+                "results": [
+                    {
+                        "dataset_id": r.dataset_id,
+                        "adapter": r.adapter,
+                        "rows_added": r.rows_added,
+                        "duration_seconds": round(r.duration_seconds, 2),
+                        "status": r.status,
+                        "error_message": r.error_message,
+                    }
+                    for r in report.results
+                ],
+            }
+        )
+        return
+
+    if args.command == "audit-data":
+        import sys as _sys
+        from .data_ingest.audit import run_audit as _run_audit
+        report = _run_audit(
+            raw_db_path=Path(args.raw_db),
+            out_dir=Path(args.out_dir),
+        )
+        _dump_json(
+            {
+                "raw_db_path": report.raw_db_path,
+                "run_at": report.run_at,
+                "overall_status": report.overall_status,
+                "outcomes": [
+                    {
+                        "check_id": o.check_id,
+                        "severity": o.severity,
+                        "result": o.result,
+                        "details": o.details,
+                    }
+                    for o in report.outcomes
+                ],
+            }
+        )
+        if report.overall_status == "blocking_failure":
+            _sys.exit(1)
+        return
+
+    if args.command == "compute-descriptor":
+        from .factor_evaluation import descriptor_stubs  # noqa: F401 — register stubs
+        from .factor_evaluation.cli_handlers import handle_compute_descriptor
+        sys.exit(handle_compute_descriptor(args))
+        return
+
+    if args.command == "evaluate-descriptor":
+        from .factor_evaluation import descriptor_stubs  # noqa: F401
+        from .factor_evaluation.cli_handlers import handle_evaluate_descriptor
+        sys.exit(handle_evaluate_descriptor(args))
+        return
+
+    if args.command == "list-evaluation-reports":
+        from .factor_evaluation.cli_handlers import handle_list_evaluation_reports
+        sys.exit(handle_list_evaluation_reports(args))
+        return
+
+    if args.command == "mine-factors":
+        from pathlib import Path as _Path
+        from alpha_find_v2.factor_lab.run import execute_mining_run
+
+        start = args.start
+        end = args.end
+        if len(start) != 8 or not start.isdigit():
+            print(f"Error: --start must be YYYYMMDD format, got {start!r}", file=sys.stderr)
+            sys.exit(2)
+        if len(end) != 8 or not end.isdigit():
+            print(f"Error: --end must be YYYYMMDD format, got {end!r}", file=sys.stderr)
+            sys.exit(2)
+        if start > end:
+            print(f"Error: --start {start} must be <= --end {end}", file=sys.stderr)
+            sys.exit(2)
+
+        result = execute_mining_run(
+            research_db=_Path(args.research_db),
+            start=start,
+            end=end,
+            config_path=_Path(args.config),
+        )
+        print(json.dumps(result))
+        return
+
+    if args.command == "list-factor-candidates":
+        from pathlib import Path as _Path
+        from alpha_find_v2.factor_lab.registry import list_runs
+
+        runs = list_runs(
+            family=args.family if args.family else None,
+            min_ic_ir=args.min_ic_ir,
+            shortlist_dir_base=_Path("output/factor_lab"),
+        )
+        print(json.dumps(runs))
+        return
+
+    if args.command == "inspect-candidate":
+        from pathlib import Path as _Path
+        from alpha_find_v2.factor_lab.inspect import run_inspection
+
+        run_inspection(
+            run_id=args.run_id,
+            expr_id=args.expr_id,
+            output_root=_Path("output/factor_lab"),
+            research_db=_Path(args.research_db),
         )
         return
 

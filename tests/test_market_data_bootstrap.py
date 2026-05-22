@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 import subprocess
 import tempfile
+import os
+import sys
 import unittest
 
 import duckdb
@@ -550,7 +552,7 @@ class MarketDataBootstrapTest(unittest.TestCase):
 
             result = subprocess.run(
                 [
-                    "python3",
+                    sys.executable,
                     "-m",
                     "alpha_find_v2",
                     "build-research-source-db",
@@ -560,7 +562,7 @@ class MarketDataBootstrapTest(unittest.TestCase):
                     str(target_db),
                 ],
                 cwd=Path(__file__).resolve().parents[1],
-                env={"PYTHONPATH": "src"},
+                env={**os.environ, "PYTHONPATH": "src"},
                 capture_output=True,
                 text=True,
                 check=False,

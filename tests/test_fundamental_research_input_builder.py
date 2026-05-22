@@ -6,6 +6,8 @@ from math import isclose
 from pathlib import Path
 import subprocess
 import tempfile
+import os
+import sys
 import unittest
 
 import duckdb
@@ -353,10 +355,10 @@ class FundamentalResearchInputBuilderTest(unittest.TestCase):
                         'artifact_type = "fundamental_research_input_build_case"',
                         'case_id = "fundamental_rerating_duckdb_case"',
                         'description = "Build residualized fundamental observation inputs from the isolated V2 DuckDB."',
-                        f'sleeve_path = "{sleeve_path}"',
-                        f'source_db_path = "{source_db}"',
-                        f'output_path = "{output_path}"',
-                        f'residual_component_snapshot_path = "{residual_snapshot_path}"',
+                        f'sleeve_path = "{sleeve_path.as_posix()}"',
+                        f'source_db_path = "{source_db.as_posix()}"',
+                        f'output_path = "{output_path.as_posix()}"',
+                        f'residual_component_snapshot_path = "{residual_snapshot_path.as_posix()}"',
                         f'start_date = "{first_signal}"',
                         f'end_date = "{trade_dates[29]}"',
                         'min_listing_days = 120',
@@ -423,9 +425,9 @@ class FundamentalResearchInputBuilderTest(unittest.TestCase):
                         'artifact_type = "fundamental_research_input_build_case"',
                         'case_id = "fundamental_rerating_duckdb_case"',
                         'description = "Reject missing residual snapshot path for residual targets."',
-                        f'sleeve_path = "{sleeve_path}"',
-                        f'source_db_path = "{source_db}"',
-                        f'output_path = "{temp_root / "fundamental_input.json"}"',
+                        f'sleeve_path = "{sleeve_path.as_posix()}"',
+                        f'source_db_path = "{source_db.as_posix()}"',
+                        f'output_path = "{(temp_root / "fundamental_input.json").as_posix()}"',
                         f'start_date = "{trade_dates[20]}"',
                         'industry_label_source = "industry_classification_pit"',
                         'industry_schema = "sw2021_l1"',
@@ -471,10 +473,10 @@ class FundamentalResearchInputBuilderTest(unittest.TestCase):
                         'artifact_type = "fundamental_research_input_build_case"',
                         'case_id = "fundamental_rerating_duckdb_case"',
                         'description = "Reject missing residual components for selected names."',
-                        f'sleeve_path = "{sleeve_path}"',
-                        f'source_db_path = "{source_db}"',
-                        f'output_path = "{temp_root / "fundamental_input.json"}"',
-                        f'residual_component_snapshot_path = "{residual_snapshot_path}"',
+                        f'sleeve_path = "{sleeve_path.as_posix()}"',
+                        f'source_db_path = "{source_db.as_posix()}"',
+                        f'output_path = "{(temp_root / "fundamental_input.json").as_posix()}"',
+                        f'residual_component_snapshot_path = "{residual_snapshot_path.as_posix()}"',
                         f'start_date = "{trade_dates[20]}"',
                         f'end_date = "{trade_dates[20]}"',
                         'lookback_days = 20',
@@ -520,10 +522,10 @@ class FundamentalResearchInputBuilderTest(unittest.TestCase):
                         'artifact_type = "fundamental_research_input_build_case"',
                         'case_id = "fundamental_rerating_duckdb_case"',
                         'description = "CLI build of residualized fundamental observation input."',
-                        f'sleeve_path = "{sleeve_path}"',
-                        f'source_db_path = "{source_db}"',
-                        f'output_path = "{output_path}"',
-                        f'residual_component_snapshot_path = "{residual_snapshot_path}"',
+                        f'sleeve_path = "{sleeve_path.as_posix()}"',
+                        f'source_db_path = "{source_db.as_posix()}"',
+                        f'output_path = "{output_path.as_posix()}"',
+                        f'residual_component_snapshot_path = "{residual_snapshot_path.as_posix()}"',
                         f'start_date = "{trade_dates[20]}"',
                         f'end_date = "{trade_dates[29]}"',
                         'min_listing_days = 120',
@@ -541,7 +543,7 @@ class FundamentalResearchInputBuilderTest(unittest.TestCase):
 
             result = subprocess.run(
                 [
-                    "python3",
+                    sys.executable,
                     "-m",
                     "alpha_find_v2",
                     "build-fundamental-research-input",
@@ -549,7 +551,7 @@ class FundamentalResearchInputBuilderTest(unittest.TestCase):
                     str(case_path),
                 ],
                 cwd=Path(__file__).resolve().parents[1],
-                env={"PYTHONPATH": "src"},
+                env={**os.environ, "PYTHONPATH": "src"},
                 capture_output=True,
                 text=True,
                 check=False,

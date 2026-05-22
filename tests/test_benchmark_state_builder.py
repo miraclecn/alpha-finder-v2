@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 import subprocess
 import tempfile
+import os
+import sys
 import unittest
 
 import duckdb
@@ -122,8 +124,8 @@ class BenchmarkStateBuilderTest(unittest.TestCase):
                         'artifact_type = "benchmark_state_build_case"',
                         'case_id = "csi800_proxy_weights"',
                         'description = "Build benchmark state from PIT membership and industry tables."',
-                        f'source_db_path = "{source_db}"',
-                        f'output_path = "{output_path}"',
+                        f'source_db_path = "{source_db.as_posix()}"',
+                        f'output_path = "{output_path.as_posix()}"',
                         'benchmark_id = "CSI 800"',
                         'industry_schema = "citics_l1"',
                         'start_date = "20240102"',
@@ -182,8 +184,8 @@ class BenchmarkStateBuilderTest(unittest.TestCase):
                         'artifact_type = "benchmark_state_build_case"',
                         'case_id = "csi800_missing_industry"',
                         'description = "Reject missing PIT industry on active member."',
-                        f'source_db_path = "{source_db}"',
-                        f'output_path = "{temp_root / "benchmark_state_history.json"}"',
+                        f'source_db_path = "{source_db.as_posix()}"',
+                        f'output_path = "{(temp_root / "benchmark_state_history.json").as_posix()}"',
                         'benchmark_id = "CSI 800"',
                         'industry_schema = "citics_l1"',
                         'start_date = "20240103"',
@@ -223,8 +225,8 @@ class BenchmarkStateBuilderTest(unittest.TestCase):
                         'artifact_type = "benchmark_state_build_case"',
                         'case_id = "csi800_provider_weight"',
                         'description = "Build benchmark state from provider snapshots."',
-                        f'source_db_path = "{source_db}"',
-                        f'output_path = "{temp_root / "benchmark_state_history.json"}"',
+                        f'source_db_path = "{source_db.as_posix()}"',
+                        f'output_path = "{(temp_root / "benchmark_state_history.json").as_posix()}"',
                         'benchmark_id = "CSI 800"',
                         'industry_schema = "citics_l1"',
                         'start_date = "20240102"',
@@ -282,8 +284,8 @@ class BenchmarkStateBuilderTest(unittest.TestCase):
                         'artifact_type = "benchmark_state_build_case"',
                         'case_id = "csi800_cli_build"',
                         'description = "CLI build of benchmark state history."',
-                        f'source_db_path = "{source_db}"',
-                        f'output_path = "{output_path}"',
+                        f'source_db_path = "{source_db.as_posix()}"',
+                        f'output_path = "{output_path.as_posix()}"',
                         'benchmark_id = "CSI 800"',
                         'industry_schema = "citics_l1"',
                         'start_date = "20240102"',
@@ -295,7 +297,7 @@ class BenchmarkStateBuilderTest(unittest.TestCase):
 
             result = subprocess.run(
                 [
-                    "python3",
+                    sys.executable,
                     "-m",
                     "alpha_find_v2",
                     "build-benchmark-state",
@@ -303,7 +305,7 @@ class BenchmarkStateBuilderTest(unittest.TestCase):
                     str(case_path),
                 ],
                 cwd=Path(__file__).resolve().parents[1],
-                env={"PYTHONPATH": "src"},
+                env={**os.environ, "PYTHONPATH": "src"},
                 capture_output=True,
                 text=True,
                 check=False,
