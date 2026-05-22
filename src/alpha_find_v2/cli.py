@@ -414,6 +414,19 @@ def _parse_args() -> argparse.Namespace:
         help="Path to write the market-data quality JSON audit.",
     )
 
+    build_regime_overlay_observations = subparsers.add_parser(
+        "build-regime-overlay-observations",
+        help="Build a regime overlay observation history from PIT benchmark and daily-bar inputs.",
+    )
+    build_regime_overlay_observations.add_argument(
+        "--case",
+        default=(
+            "research/examples/deployment_minimal/"
+            "trend_live_candidate_overlay_observation_build.toml"
+        ),
+        help="Path to the regime-overlay observation build-case TOML file.",
+    )
+
     # ---- Data ingestion commands ----------------------------------------
 
     init_cmd = subparsers.add_parser(
@@ -895,6 +908,31 @@ def main() -> None:
             output_path=Path(args.output),
         )
         _dump_json(result)
+        return
+
+    if args.command == "build-regime-overlay-observations":
+        from .regime_overlay_observation_builder import (
+            build_regime_overlay_observation_history,
+            load_regime_overlay_observation_build_case,
+            write_regime_overlay_observation_history,
+        )
+        loaded_case = load_regime_overlay_observation_build_case(Path(args.case))
+        result = build_regime_overlay_observation_history(loaded_case)
+        output_path = write_regime_overlay_observation_history(
+            result,
+            loaded_case.definition.output_path,
+        )
+        _dump_json(
+            {
+                "case_id": result.case_id,
+                "description": result.description,
+                "overlay_id": result.overlay_id,
+                "benchmark_id": result.benchmark_id,
+                "trade_date_count": result.trade_date_count,
+                "output_path": str(output_path),
+                "state_counts": result.state_counts,
+            }
+        )
         return
 
     if args.command == "init":
