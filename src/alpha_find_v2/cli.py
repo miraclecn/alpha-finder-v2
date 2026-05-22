@@ -397,6 +397,23 @@ def _parse_args() -> argparse.Namespace:
         help="Path to the decay-watch case TOML file.",
     )
 
+    # ---- Audit commands -------------------------------------------------
+
+    audit_market_data_quality = subparsers.add_parser(
+        "audit-market-data-quality",
+        help="Write a JSON quality audit for a V2 research-source DuckDB.",
+    )
+    audit_market_data_quality.add_argument(
+        "--source-db",
+        default="output/research_source.duckdb",
+        help="Path to the V2 research-source DuckDB file to audit.",
+    )
+    audit_market_data_quality.add_argument(
+        "--output",
+        default=f"output/audits/market_data_quality_{date.today().strftime('%Y%m%d')}.json",
+        help="Path to write the market-data quality JSON audit.",
+    )
+
     # ---- Data ingestion commands ----------------------------------------
 
     init_cmd = subparsers.add_parser(
@@ -869,6 +886,15 @@ def main() -> None:
                 "record": asdict(record),
             }
         )
+        return
+
+    if args.command == "audit-market-data-quality":
+        from .market_data_quality import write_market_data_quality_audit
+        result = write_market_data_quality_audit(
+            source_db=Path(args.source_db),
+            output_path=Path(args.output),
+        )
+        _dump_json(result)
         return
 
     if args.command == "init":
