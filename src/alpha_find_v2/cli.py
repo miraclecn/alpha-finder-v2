@@ -25,11 +25,12 @@ from .config_loader import (
     load_thesis,
 )
 from .research_artifact_builder import build_sleeve_artifact, write_sleeve_artifact
-from .deployment import DecayMonitorEvaluator, ExecutableSignalBuilder
+from .deployment import DecayMonitorEvaluator, ExecutableSignalBuilder, build_run_manifest, write_run_manifest
 from .deployment_loader import (
     load_decay_watch_case,
     load_executable_signal_case,
     load_portfolio_state_snapshot,
+    load_run_manifest_case,
 )
 from .live_state import (
     account_state_to_portfolio_state,
@@ -86,7 +87,40 @@ def _promotion_replay_research_evidence_payload(
             if result.regime_breakdown is not None
             else None
         ),
+        "regime_overlay": (
+            asdict(result.regime_overlay)
+            if result.regime_overlay is not None
+            else None
+        ),
+        "market_data_quality": (
+            asdict(result.market_data_quality)
+            if result.market_data_quality is not None
+            else None
+        ),
     }
+
+
+def _build_executable_signal_package(loaded_case: object) -> tuple[object, object]:
+    construction_step = PortfolioConstructor(
+        mandate=loaded_case.mandate,
+        portfolio=loaded_case.portfolio,
+        construction_model=loaded_case.construction_model,
+    ).build([loaded_case.construction_input]).steps[0]
+    package = ExecutableSignalBuilder(
+        mandate=loaded_case.mandate,
+        portfolio=loaded_case.portfolio,
+        execution_policy=loaded_case.execution_policy,
+        default_cost_model=loaded_case.default_cost_model,
+        cost_models=loaded_case.cost_models,
+        portfolio_overlay=loaded_case.regime_overlay,
+    ).build(
+        trade_date=loaded_case.definition.trade_date,
+        execution_date=loaded_case.definition.execution_date,
+        signals=construction_step.signals,
+        portfolio_state=loaded_case.portfolio_state,
+        regime_overlay_decision=loaded_case.regime_overlay_decision,
+    )
+    return construction_step, package
 
 
 def _parse_benchmark_reference(value: str) -> BenchmarkReferenceDefinition:
@@ -425,6 +459,69 @@ def _parse_args() -> argparse.Namespace:
             "trend_live_candidate_overlay_observation_build.toml"
         ),
         help="Path to the regime-overlay observation build-case TOML file.",
+    )
+
+    build_run_manifest_cmd = subparsers.add_parser(
+        "build-run-manifest",
+        help="Build a run manifest from an executable-signal deployment case.",
+    )
+    build_run_manifest_cmd.add_argument(
+        "--case",
+        default="research/examples/deployment_minimal/run_manifest_case.toml",
+        help="Path to the run-manifest case TOML file.",
+    )
+
+    run_portfolio_backtest = subparsers.add_parser(
+        "run-portfolio-backtest",
+        help="Run a daily portfolio-level backtest case from persisted research artifacts.",
+    )
+    run_portfolio_backtest.add_argument(
+        "--case",
+        default="research/examples/deployment_minimal/trend_live_candidate_portfolio_backtest.toml",
+        help="Path to the portfolio-backtest case TOML file.",
+    )
+
+    validate_live_candidate_bundle = subparsers.add_parser(
+        "validate-live-candidate-bundle",
+        help="Validate a frozen live-candidate bundle for shadow-live use.",
+    )
+    validate_live_candidate_bundle.add_argument(
+        "--path",
+        default="research/examples/deployment_minimal/trend_leadership_live_candidate_v1.toml",
+        help="Path to the live-candidate bundle TOML file.",
+    )
+
+    evaluate_shadow_live_journal_cmd = subparsers.add_parser(
+        "evaluate-shadow-live-journal",
+        help="Evaluate whether a shadow-live journal meets the live-readiness gate.",
+    )
+    evaluate_shadow_live_journal_cmd.add_argument(
+        "--path",
+        default="research/examples/deployment_minimal/shadow_live_journal_trend_leadership_v1.json",
+        help="Path to the shadow-live journal JSON file.",
+    )
+
+    evaluate_multi_year_validation_audit_cmd = subparsers.add_parser(
+        "evaluate-multi-year-validation-audit",
+        help="Evaluate whether the frozen candidate has a sufficient multi-year audited validation window.",
+    )
+    evaluate_multi_year_validation_audit_cmd.add_argument(
+        "--path",
+        default="research/examples/deployment_minimal/trend_leadership_multi_year_validation_audit_v1.json",
+        help="Path to the multi-year validation audit JSON file.",
+    )
+
+    build_multi_year_validation_audit_cmd = subparsers.add_parser(
+        "build-multi-year-validation-audit",
+        help="Build a reproducible multi-year validation audit artifact from benchmark, trend, and replay evidence.",
+    )
+    build_multi_year_validation_audit_cmd.add_argument(
+        "--case",
+        default=(
+            "research/examples/deployment_minimal/"
+            "trend_leadership_multi_year_validation_audit_v1.toml"
+        ),
+        help="Path to the multi-year validation audit build-case TOML file.",
     )
 
     # ---- Data ingestion commands ----------------------------------------
@@ -854,25 +951,154 @@ def main() -> None:
         )
         return
 
+    if args.command == "validate-live-candidate-bundle":
+        from .live_readiness import load_live_candidate_bundle
+        loaded_bundle = load_live_candidate_bundle(Path(args.path))
+        _dump_json(
+            {
+                "candidate_id": loaded_bundle.definition.candidate_id,
+                "version": loaded_bundle.definition.version,
+                "status": loaded_bundle.definition.status,
+                "thesis_id": loaded_bundle.thesis.id,
+                "descriptor_set_id": loaded_bundle.descriptor_set.id,
+                "sleeve_id": loaded_bundle.sleeve.id,
+                "target_id": loaded_bundle.target.id,
+                "portfolio_id": loaded_bundle.portfolio.id,
+                "regime_overlay_id": loaded_bundle.definition.regime_overlay_id,
+            }
+        )
+        return
+
+    if args.command == "evaluate-shadow-live-journal":
+        from .live_readiness import evaluate_shadow_live_journal
+        evaluation = evaluate_shadow_live_journal(Path(args.path))
+        _dump_json(
+            {
+                "candidate_id": evaluation.bundle.definition.candidate_id,
+                "status": evaluation.bundle.definition.status,
+                "summary": asdict(evaluation.summary),
+            }
+        )
+        return
+
+    if args.command == "evaluate-multi-year-validation-audit":
+        from .live_readiness import evaluate_multi_year_validation_audit
+        evaluation = evaluate_multi_year_validation_audit(Path(args.path))
+        _dump_json(
+            {
+                "candidate_id": evaluation.definition.candidate_id,
+                "as_of_date": evaluation.definition.as_of_date,
+                "validation_window_start": evaluation.definition.validation_window_start,
+                "validation_window_end": evaluation.definition.validation_window_end,
+                "summary": asdict(evaluation.summary),
+                "notes": list(evaluation.definition.notes),
+            }
+        )
+        return
+
+    if args.command == "build-multi-year-validation-audit":
+        from .live_readiness import (
+            build_multi_year_validation_audit,
+            evaluate_multi_year_validation_audit,
+            load_multi_year_validation_audit_build_case,
+            write_multi_year_validation_audit,
+        )
+        loaded_case = load_multi_year_validation_audit_build_case(Path(args.case))
+        definition = build_multi_year_validation_audit(loaded_case)
+        output_path = write_multi_year_validation_audit(
+            definition,
+            loaded_case.definition.output_path,
+        )
+        evaluation = evaluate_multi_year_validation_audit(output_path)
+        _dump_json(
+            {
+                "case_id": loaded_case.definition.case_id,
+                "candidate_id": definition.candidate_id,
+                "portfolio_id": loaded_case.portfolio.id,
+                "benchmark_id": loaded_case.benchmark_state_artifact.benchmark_id,
+                "output_path": str(output_path),
+                "summary": asdict(evaluation.summary),
+            }
+        )
+        return
+
+    if args.command == "run-portfolio-backtest":
+        from .portfolio_backtester import (
+            load_portfolio_backtest_case,
+            run_loaded_portfolio_backtest,
+            write_portfolio_backtest_artifact,
+        )
+        loaded_case = load_portfolio_backtest_case(Path(args.case))
+        result = run_loaded_portfolio_backtest(loaded_case)
+        output_path = write_portfolio_backtest_artifact(
+            case_id=loaded_case.definition.case_id,
+            description=loaded_case.definition.description,
+            result=result,
+            path=loaded_case.definition.output_path,
+        )
+        _dump_json(
+            {
+                "case_id": loaded_case.definition.case_id,
+                "description": loaded_case.definition.description,
+                "output_path": str(output_path),
+                "summary": asdict(result.summary) if result.summary is not None else None,
+            }
+        )
+        return
+
+    if args.command == "build-run-manifest":
+        loaded_case = load_run_manifest_case(Path(args.case))
+        if loaded_case.executable_signal_case.definition.live_candidate_bundle_path:
+            from .live_readiness import validate_live_candidate_signal_release
+            validate_live_candidate_signal_release(
+                bundle_path=loaded_case.executable_signal_case.definition.live_candidate_bundle_path,
+                portfolio_path=loaded_case.executable_signal_case.definition.portfolio_path,
+            )
+        construction_step, package = _build_executable_signal_package(
+            loaded_case.executable_signal_case
+        )
+        manifest = build_run_manifest(
+            run_id=loaded_case.executable_signal_case.definition.case_id,
+            package=package,
+            benchmark_state_path=(
+                loaded_case.executable_signal_case.definition.benchmark_state_path
+                or loaded_case.executable_signal_case.definition.benchmark_industry_weights_path
+            ),
+            sleeve_artifact_paths=loaded_case.executable_signal_case.definition.artifact_paths,
+            portfolio_path=loaded_case.executable_signal_case.definition.portfolio_path,
+            account_state_path=loaded_case.executable_signal_case.definition.account_state_path,
+            portfolio_state_path=loaded_case.executable_signal_case.definition.portfolio_state_path,
+            data_version=loaded_case.definition.data_version,
+            data_build_date=loaded_case.definition.data_build_date,
+            operator_id=loaded_case.definition.operator_id,
+            operator_timestamp=loaded_case.definition.operator_timestamp,
+        )
+        output_path = write_run_manifest(manifest, loaded_case.definition.output_path)
+        _dump_json(
+            {
+                "case_id": loaded_case.definition.case_id,
+                "description": loaded_case.definition.description,
+                "output_path": str(output_path),
+                "construction_step": asdict(construction_step),
+                "package": asdict(package),
+                "manifest": {
+                    "schema_version": 1,
+                    "artifact_type": "run_manifest",
+                    **asdict(manifest),
+                },
+            }
+        )
+        return
+
     if args.command == "build-executable-signal":
         loaded_case = load_executable_signal_case(Path(args.case))
-        construction_step = PortfolioConstructor(
-            mandate=loaded_case.mandate,
-            portfolio=loaded_case.portfolio,
-            construction_model=loaded_case.construction_model,
-        ).build([loaded_case.construction_input]).steps[0]
-        package = ExecutableSignalBuilder(
-            mandate=loaded_case.mandate,
-            portfolio=loaded_case.portfolio,
-            execution_policy=loaded_case.execution_policy,
-            default_cost_model=loaded_case.default_cost_model,
-            cost_models=loaded_case.cost_models,
-        ).build(
-            trade_date=loaded_case.definition.trade_date,
-            execution_date=loaded_case.definition.execution_date,
-            signals=construction_step.signals,
-            portfolio_state=loaded_case.portfolio_state,
-        )
+        if loaded_case.definition.live_candidate_bundle_path:
+            from .live_readiness import validate_live_candidate_signal_release
+            validate_live_candidate_signal_release(
+                bundle_path=loaded_case.definition.live_candidate_bundle_path,
+                portfolio_path=loaded_case.definition.portfolio_path,
+            )
+        construction_step, package = _build_executable_signal_package(loaded_case)
         _dump_json(
             {
                 "case_id": loaded_case.definition.case_id,
@@ -891,6 +1117,9 @@ def main() -> None:
             window_label=loaded_case.definition.window_label,
             promotion_snapshot=loaded_case.promotion_snapshot,
             realized_summary=loaded_case.realized_summary,
+            run_manifest=loaded_case.run_manifest,
+            manual_execution_outcome=loaded_case.manual_execution_outcome,
+            realized_trading_window=loaded_case.realized_trading_window,
         )
         _dump_json(
             {

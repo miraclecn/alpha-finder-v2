@@ -11,17 +11,23 @@ from .research_artifact_loader import (
     SleeveResearchObservationRecord,
     SleeveResearchObservationStep,
 )
+from .scoring import group_neutral_zscore_map, rank_then_cap_weights, zscore_map
 from .target_builder import TradeLegState
 from .trend_research_input_builder import (
     SUPPORTED_LIMIT_LOCK_MODES,
     _calendar_bounds,
+    _filter_corporate_action_exception_candidates,
+    _filter_market_data_fallback_candidates,
     _is_cn_a_directional_open_lock,
+    _load_corporate_action_exception_windows,
     _load_industry_labels,
+    _load_market_data_fallback_windows,
     _load_trade_calendar,
     _load_trade_leg_snapshots,
     _read_toml,
     _resolve_project_path,
     _resolve_trade_leg_open,
+    _timestamp_sql,
     _trade_leg_fallback_price,
     write_trend_research_observation_input,
 )
@@ -99,9 +105,12 @@ class LoadedFundamentalResearchInputBuildCase:
     sleeve_id: str
     descriptor_set_id: str
     target_id: str
+    risk_model_id: str
     source_db_path: Path
     output_path: str
     holding_count: int
+    construction_selection: str
+    weight_cap: float
     holding_horizon_days: int
     min_turnover_cny_mn: float
     descriptor_weights: dict[str, float]
@@ -118,6 +127,18 @@ class FundamentalResearchObservationBuildResult:
     source_db_path: str
     observation_input: SleeveResearchObservationInput
     warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class ValidatedResidualComponentSnapshot:
+    path: str
+    target_id: str
+    risk_model_id: str
+    required_components: list[str]
+    step_count: int
+    record_count: int
+    provenance: dict[str, str]
+    components_by_observation: dict[tuple[str, str], dict[str, float]]
 
 
 @dataclass(slots=True)
@@ -143,6 +164,9 @@ class _FundamentalCandidateRow:
     debt_to_assets: float
     netprofit_yoy: float
     dt_netprofit_yoy: float
+    quarantine_start_trade_date: str = ""
+    entry_trade_date: str = ""
+    exit_trade_date: str = ""
 
 
 def load_fundamental_research_input_build_case(
@@ -190,6 +214,8 @@ def load_fundamental_research_input_build_case(
         CONFIG_ROOT / "cost_models" / f"{target.cost_model}.toml"
     )
     holding_count = int(sleeve.construction.get("holding_count", 0))
+    construction_selection = str(sleeve.construction.get("selection", "equal_weight"))
+    weight_cap = float(sleeve.construction.get("weight_cap", 0.0))
     min_turnover_cny_mn = max(
         float(sleeve.constraints.get("min_median_daily_turnover_cny_mn", 0.0)),
         default_cost_model.min_median_daily_turnover_cny_mn,
@@ -200,9 +226,12 @@ def load_fundamental_research_input_build_case(
         sleeve_id=sleeve.id,
         descriptor_set_id=descriptor_set.id,
         target_id=target.id,
+        risk_model_id=target.risk_model_id,
         source_db_path=_resolve_project_path(definition.source_db_path),
         output_path=definition.output_path,
         holding_count=holding_count,
+        construction_selection=construction_selection,
+        weight_cap=weight_cap,
         holding_horizon_days=target.horizon_days,
         min_turnover_cny_mn=min_turnover_cny_mn,
         descriptor_weights=_descriptor_weights(descriptor_set),
@@ -242,6 +271,22 @@ def build_fundamental_research_observation_input(
         limit_lock_mode=loaded_case.definition.limit_lock_mode,
         industry_schema=loaded_case.definition.industry_schema,
     )
+    exception_windows = _load_corporate_action_exception_windows(
+        loaded_case.source_db_path
+    )
+    candidates, corporate_action_exception_excluded_count = (
+        _filter_corporate_action_exception_candidates(
+            candidates=candidates,
+            exception_windows=exception_windows,
+        )
+    )
+    fallback_windows = _load_market_data_fallback_windows(loaded_case.source_db_path)
+    candidates, market_data_fallback_excluded_counts = (
+        _filter_market_data_fallback_candidates(
+            candidates=candidates,
+            fallback_windows=fallback_windows,
+        )
+    )
 
     if not candidates:
         raise ValueError(
@@ -273,6 +318,7 @@ def build_fundamental_research_observation_input(
         residual_components_by_observation = _load_residual_component_snapshot(
             path=loaded_case.residual_component_snapshot_path,
             target_id=loaded_case.target_id,
+            risk_model_id=loaded_case.risk_model_id,
             requested_observations=[
                 (trade_date, str(item["candidate"].security_id))
                 for trade_date, selected in selected_by_date
@@ -283,13 +329,17 @@ def build_fundamental_research_observation_input(
 
     steps: list[SleeveResearchObservationStep] = []
     for trade_date, selected in selected_by_date:
-        target_weight = 1.0 / len(selected)
+        target_weights = _target_weights_for_selected(
+            selected=selected,
+            selection=loaded_case.construction_selection,
+            weight_cap=loaded_case.weight_cap,
+        )
         records = [
             SleeveResearchObservationRecord(
                 asset_id=item["candidate"].security_id,
                 rank=rank,
                 score=item["score"],
-                target_weight=target_weight,
+                target_weight=target_weights[item["candidate"].security_id],
                 entry_open=item["candidate"].entry_open,
                 exit_open=item["candidate"].exit_open,
                 industry=item["candidate"].industry,
@@ -319,7 +369,15 @@ def build_fundamental_research_observation_input(
         descriptor_set_id=loaded_case.descriptor_set_id,
         source_db_path=str(loaded_case.source_db_path),
         observation_input=SleeveResearchObservationInput(steps=steps),
-        warnings=_build_warnings(loaded_case.definition.limit_lock_mode),
+        warnings=_build_warnings(
+            loaded_case.definition.limit_lock_mode,
+            corporate_action_exception_excluded_count=(
+                corporate_action_exception_excluded_count
+            ),
+            market_data_fallback_excluded_counts=(
+                market_data_fallback_excluded_counts
+            ),
+        ),
     )
 
 
@@ -351,7 +409,7 @@ def _load_candidate_rows(
     conn = duckdb.connect(str(source_db_path), read_only=True)
     try:
         rows = conn.execute(
-            """
+            f"""
             WITH history AS (
                 SELECT
                     d.security_id,
@@ -427,11 +485,10 @@ def _load_candidate_rows(
             LEFT JOIN industry_classification_pit AS industry
                 ON industry.security_id = ranked.security_id
                AND industry.industry_schema = ?
-               AND substr(regexp_replace(COALESCE(industry.effective_at, ''), '[^0-9]', '', 'g'), 1, 8) <= ranked.trade_date
+               AND {_timestamp_sql('industry.effective_at')} <= strptime(ranked.trade_date, '%Y%m%d')
                AND (
-                    industry.removed_at IS NULL
-                    OR industry.removed_at = ''
-                    OR substr(regexp_replace(COALESCE(industry.removed_at, ''), '[^0-9]', '', 'g'), 1, 8) > ranked.trade_date
+                    {_timestamp_sql('industry.removed_at')} IS NULL
+                    OR {_timestamp_sql('industry.removed_at')} > strptime(ranked.trade_date, '%Y%m%d')
                )
             WHERE ranked.fundamental_row_number = 1
             ORDER BY ranked.trade_date, ranked.security_id
@@ -522,6 +579,7 @@ def _load_candidate_rows(
                 "debt_to_assets": float(debt_to_assets),
                 "netprofit_yoy": float(netprofit_yoy),
                 "dt_netprofit_yoy": float(dt_netprofit_yoy),
+                "quarantine_start_trade_date": trade_date,
                 "entry_trade_date": entry_trade_date,
                 "exit_trade_date": exit_trade_date,
             }
@@ -599,6 +657,11 @@ def _load_candidate_rows(
                 debt_to_assets=float(candidate_input["debt_to_assets"]),
                 netprofit_yoy=float(candidate_input["netprofit_yoy"]),
                 dt_netprofit_yoy=float(candidate_input["dt_netprofit_yoy"]),
+                quarantine_start_trade_date=str(
+                    candidate_input["quarantine_start_trade_date"]
+                ),
+                entry_trade_date=entry_trade_date,
+                exit_trade_date=exit_trade_date,
             )
         )
     return candidates
@@ -654,16 +717,13 @@ def _industry_neutral_zscore_map(
     candidates: list[_FundamentalCandidateRow],
     values_by_security: dict[str, float],
 ) -> dict[str, float]:
-    grouped: dict[str, dict[str, float]] = {}
-    for candidate in candidates:
-        grouped.setdefault(candidate.industry, {})[candidate.security_id] = values_by_security[
-            candidate.security_id
-        ]
-
-    zscores: dict[str, float] = {}
-    for group in grouped.values():
-        zscores.update(_zscore_map(group))
-    return zscores
+    return group_neutral_zscore_map(
+        values_by_asset=values_by_security,
+        group_by_asset={
+            candidate.security_id: candidate.industry
+            for candidate in candidates
+        },
+    )
 
 
 def _descriptor_weights(descriptor_set) -> dict[str, float]:
@@ -693,41 +753,18 @@ def _load_residual_component_snapshot(
     *,
     path: Path | None,
     target_id: str,
+    risk_model_id: str,
     requested_observations: list[tuple[str, str]],
     required_components: list[str],
 ) -> dict[tuple[str, str], dict[str, float]]:
-    if path is None:
-        raise ValueError(
-            "Fundamental research input build case requires residual_component_snapshot_path "
-            "for residual targets."
-        )
+    validated_snapshot = validate_residual_component_snapshot_intake(
+        path=path,
+        target_id=target_id,
+        risk_model_id=risk_model_id,
+        required_components=required_components,
+    )
 
-    payload = _read_json(path)
-    schema_version = int(payload.get("schema_version", 0))
-    if schema_version != 1:
-        raise ValueError(
-            "Unsupported residual component snapshot schema version: "
-            f"{schema_version}"
-        )
-    artifact_type = str(payload.get("artifact_type", ""))
-    if artifact_type != "residual_component_snapshot":
-        raise ValueError(
-            f"Unsupported residual component snapshot type: {artifact_type}"
-        )
-    snapshot_target_id = str(payload.get("target_id", ""))
-    if snapshot_target_id and snapshot_target_id != target_id:
-        raise ValueError(
-            "Residual component snapshot target_id does not match build case target_id."
-        )
-
-    snapshot_by_observation: dict[tuple[str, str], dict[str, float]] = {}
-    for step in payload.get("steps", []):
-        trade_date = str(step["trade_date"])
-        for record in step.get("records", []):
-            snapshot_by_observation[(trade_date, str(record["asset_id"]))] = {
-                str(key): float(value)
-                for key, value in dict(record.get("residual_components", {})).items()
-            }
+    snapshot_by_observation = validated_snapshot.components_by_observation
 
     selected: dict[tuple[str, str], dict[str, float]] = {}
     for trade_date, asset_id in requested_observations:
@@ -752,24 +789,252 @@ def _load_residual_component_snapshot(
     return selected
 
 
-def _build_warnings(limit_lock_mode: str) -> list[str]:
+def validate_residual_component_snapshot_intake(
+    *,
+    path: Path | str | None,
+    target_id: str,
+    risk_model_id: str,
+    required_components: list[str],
+    required_coverage_path: Path | str | None = None,
+) -> ValidatedResidualComponentSnapshot:
+    if path is None:
+        raise ValueError(
+            "Fundamental research input build case requires residual_component_snapshot_path "
+            "for residual targets."
+        )
+
+    resolved_path = _resolve_project_path(path)
+    if not resolved_path.exists():
+        raise ValueError(f"Residual component snapshot file not found: {resolved_path}")
+    payload = _read_json(resolved_path)
+    schema_version = int(payload.get("schema_version", 0))
+    if schema_version != 1:
+        raise ValueError(
+            "Unsupported residual component snapshot schema version: "
+            f"{schema_version}"
+        )
+    artifact_type = str(payload.get("artifact_type", ""))
+    if artifact_type != "residual_component_snapshot":
+        raise ValueError(
+            f"Unsupported residual component snapshot type: {artifact_type}"
+        )
+
+    snapshot_target_id = str(payload.get("target_id", ""))
+    if snapshot_target_id != target_id:
+        raise ValueError(
+            "Residual component snapshot target_id does not match expected target_id."
+        )
+
+    provenance = _load_residual_component_snapshot_provenance(payload)
+    snapshot_risk_model_id = str(
+        payload.get("risk_model_id", provenance.get("risk_model_id", ""))
+    ).strip()
+    if snapshot_risk_model_id != risk_model_id:
+        raise ValueError(
+            "Residual component snapshot risk_model_id does not match expected risk_model_id."
+        )
+
+    snapshot_by_observation: dict[tuple[str, str], dict[str, float]] = {}
+    step_count = 0
+    record_count = 0
+    for step in payload.get("steps", []):
+        trade_date = str(step.get("trade_date", "")).strip()
+        if not trade_date:
+            raise ValueError("Residual component snapshot step missing trade_date.")
+        step_count += 1
+        for record in step.get("records", []):
+            asset_id = str(record.get("asset_id", "")).strip()
+            if not asset_id:
+                raise ValueError(
+                    f"Residual component snapshot record missing asset_id on {trade_date}."
+                )
+
+            observation_key = (trade_date, asset_id)
+            if observation_key in snapshot_by_observation:
+                raise ValueError(
+                    "Duplicate residual component snapshot observation: "
+                    f"{asset_id} on {trade_date}"
+                )
+
+            components = {
+                str(key): float(value)
+                for key, value in dict(record.get("residual_components", {})).items()
+            }
+            missing_components = [
+                component for component in required_components if component not in components
+            ]
+            if missing_components:
+                joined = ", ".join(sorted(missing_components))
+                raise ValueError(
+                    "Missing residual components for snapshot observation: "
+                    f"{asset_id} on {trade_date}: {joined}"
+                )
+
+            snapshot_by_observation[observation_key] = {
+                component: float(components[component]) for component in required_components
+            }
+            record_count += 1
+
+    if step_count <= 0:
+        raise ValueError("Residual component snapshot must contain at least one step.")
+
+    if required_coverage_path is not None:
+        required_coverage = _load_required_residual_snapshot_coverage(
+            path=required_coverage_path,
+            target_id=target_id,
+        )
+        missing_required_observations = sorted(
+            required_coverage - set(snapshot_by_observation.keys())
+        )
+        if missing_required_observations:
+            preview = ", ".join(
+                f"{asset_id} on {trade_date}"
+                for trade_date, asset_id in missing_required_observations[:5]
+            )
+            raise ValueError(
+                "Residual component snapshot is missing required coverage observations: "
+                + preview
+            )
+
+    return ValidatedResidualComponentSnapshot(
+        path=str(resolved_path),
+        target_id=target_id,
+        risk_model_id=risk_model_id,
+        required_components=list(required_components),
+        step_count=step_count,
+        record_count=record_count,
+        provenance=provenance,
+        components_by_observation=snapshot_by_observation,
+    )
+
+
+def _load_residual_component_snapshot_provenance(
+    payload: dict[str, object],
+) -> dict[str, str]:
+    provenance_payload = payload.get("provenance")
+    if not isinstance(provenance_payload, dict):
+        raise ValueError(
+            "Residual component snapshot must include provenance metadata."
+        )
+
+    required_fields = (
+        "benchmark_definition",
+        "industry_schema",
+        "generation_date",
+        "audited_export_path",
+        "risk_model_id",
+    )
+    provenance: dict[str, str] = {}
+    missing_fields: list[str] = []
+    for field_name in required_fields:
+        value = str(provenance_payload.get(field_name, "")).strip()
+        if not value:
+            missing_fields.append(field_name)
+            continue
+        provenance[field_name] = value
+
+    if missing_fields:
+        raise ValueError(
+            "Residual component snapshot provenance is missing required fields: "
+            + ", ".join(missing_fields)
+        )
+    return provenance
+
+
+def _load_required_residual_snapshot_coverage(
+    *,
+    path: Path | str,
+    target_id: str,
+) -> set[tuple[str, str]]:
+    resolved_path = _resolve_project_path(path)
+    if not resolved_path.exists():
+        raise ValueError(
+            f"Residual snapshot required coverage file not found: {resolved_path}"
+        )
+    payload = _read_json(resolved_path)
+    schema_version = int(payload.get("schema_version", 0))
+    if schema_version != 1:
+        raise ValueError(
+            "Unsupported residual snapshot required coverage schema version: "
+            f"{schema_version}"
+        )
+    artifact_type = str(payload.get("artifact_type", ""))
+    if artifact_type != "residual_snapshot_required_coverage":
+        raise ValueError(
+            f"Unsupported residual snapshot required coverage type: {artifact_type}"
+        )
+    coverage_target_id = str(payload.get("target_id", ""))
+    if coverage_target_id != target_id:
+        raise ValueError(
+            "Residual snapshot required coverage target_id does not match expected target_id."
+        )
+
+    required_observations: set[tuple[str, str]] = set()
+    for step in payload.get("records_by_trade_date", []):
+        trade_date = str(step.get("trade_date", "")).strip()
+        if not trade_date:
+            raise ValueError("Residual snapshot required coverage step missing trade_date.")
+        for asset_id in step.get("required_union_asset_ids", []):
+            normalized_asset_id = str(asset_id).strip()
+            if not normalized_asset_id:
+                raise ValueError(
+                    f"Residual snapshot required coverage contains a blank asset_id on {trade_date}."
+                )
+            required_observations.add((trade_date, normalized_asset_id))
+
+    if not required_observations:
+        raise ValueError(
+            "Residual snapshot required coverage must contain at least one observation."
+        )
+
+    return required_observations
+
+
+def _build_warnings(
+    limit_lock_mode: str,
+    *,
+    corporate_action_exception_excluded_count: int = 0,
+    market_data_fallback_excluded_counts: dict[str, int] | None = None,
+) -> list[str]:
     warnings = ["fundamental_snapshot_pit_amber_anchor_only"]
     if limit_lock_mode == "disabled":
         warnings.append("limit_lock_detection_disabled")
+    if corporate_action_exception_excluded_count > 0:
+        warnings.append(
+            "corporate_action_exception_quarantine_excluded_count="
+            f"{corporate_action_exception_excluded_count}"
+        )
+    fallback_counts = market_data_fallback_excluded_counts or {}
+    qfq_count = int(fallback_counts.get("qfq_fallback_price_basis", 0))
+    tradeability_count = int(fallback_counts.get("tradeability_ohlc_fallback", 0))
+    if qfq_count > 0:
+        warnings.append(f"qfq_fallback_quarantine_excluded_count={qfq_count}")
+    if tradeability_count > 0:
+        warnings.append(
+            "tradeability_fallback_quarantine_excluded_count="
+            f"{tradeability_count}"
+        )
     return warnings
 
 
 def _zscore_map(values: dict[str, float]) -> dict[str, float]:
-    series = list(values.values())
-    if len(series) < 2:
-        return {key: 0.0 for key in values}
+    return zscore_map(values)
 
-    mean = sum(series) / len(series)
-    variance = sum((value - mean) ** 2 for value in series) / (len(series) - 1)
-    if variance <= 0.0:
-        return {key: 0.0 for key in values}
-    stdev = math.sqrt(variance)
-    return {key: (value - mean) / stdev for key, value in values.items()}
+
+def _target_weights_for_selected(
+    *,
+    selected: list[dict[str, object]],
+    selection: str,
+    weight_cap: float,
+) -> dict[str, float]:
+    asset_ids = [
+        str(item["candidate"].security_id)
+        for item in selected
+    ]
+    if selection == "rank_then_cap_weight":
+        return rank_then_cap_weights(asset_ids, weight_cap=weight_cap)
+    target_weight = 1.0 / len(asset_ids)
+    return {asset_id: target_weight for asset_id in asset_ids}
 
 
 def _listing_age_days(list_date: str, trade_date: str) -> int:

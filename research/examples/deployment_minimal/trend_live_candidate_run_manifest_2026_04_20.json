@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "artifact_type": "run_manifest",
+  "run_id": "trend_live_candidate_next_open_2026_04_20",
+  "package_id": "trend_live_candidate_portfolio_with_overlay:2026-04-20",
+  "portfolio_id": "trend_live_candidate_portfolio_with_overlay",
+  "mandate_id": "a_share_long_only_eod",
+  "trade_date": "2026-04-20",
+  "execution_date": "2026-04-21",
+  "data_version": "tushare_2000",
+  "data_build_date": "2026-04-20",
+  "benchmark_state_path": "research/examples/promotion_replay_minimal/benchmark_state_history.json",
+  "sleeve_artifact_paths": [
+    "research/examples/promotion_replay_minimal/sleeve_artifacts/trend_leadership_core.json"
+  ],
+  "portfolio_path": "research/examples/deployment_minimal/trend_live_candidate_portfolio_with_overlay.toml",
+  "account_state_path": "research/examples/deployment_minimal/account_state_2026_04_20.json",
+  "portfolio_state_path": "",
+  "execution_policy_id": "a_share_next_open_v1",
+  "base_investable_budget": 0.98,
+  "investable_budget": 0.343,
+  "target_cash_weight": 0.657,
+  "cash_weight": 0.844,
+  "regime_overlay_status": "active",
+  "regime_overlay_state": "cash_heavier",
+  "operator_id": "nan",
+  "operator_timestamp": "2026-04-21T09:20:00+08:00"
+}

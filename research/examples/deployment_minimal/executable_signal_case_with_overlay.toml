@@ -1,0 +1,19 @@
+schema_version = 1
+artifact_type = "executable_signal_case"
+
+case_id = "candidate_portfolio_next_open_2026_04_20_with_overlay"
+description = "Build the next-open executable signal package for the deployment candidate portfolio with a formal regime overlay on the 2026-04-20 decision date."
+portfolio_path = "research/examples/deployment_minimal/candidate_portfolio_with_overlay.toml"
+default_cost_model_path = "config/cost_models/base_a_share_cash.toml"
+additional_cost_model_paths = [
+  "config/cost_models/high_a_share_cash.toml",
+]
+artifact_paths = [
+  "research/examples/promotion_replay_minimal/sleeve_artifacts/fundamental_rerating_core.json",
+  "research/examples/promotion_replay_minimal/sleeve_artifacts/trend_leadership_core.json",
+]
+benchmark_state_path = "research/examples/promotion_replay_minimal/benchmark_state_history.json"
+regime_overlay_observation_path = "research/examples/promotion_replay_minimal/regime_overlay_observations.json"
+account_state_path = "research/examples/deployment_minimal/account_state_2026_04_20.json"
+trade_date = "2026-04-20"
+execution_date = "2026-04-21"

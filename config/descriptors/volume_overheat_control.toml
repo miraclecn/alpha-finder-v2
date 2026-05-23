@@ -1,0 +1,11 @@
+id = "volume_overheat_control"
+name = "Volume Overheat Control"
+category = "liquidity_confirmation"
+signal_direction = "higher_is_better"
+description = "Penalize current-day turnover spikes versus the prior five-day baseline so the sleeve avoids exhaustion moves after volume blow-offs."
+required_data = ["daily_bar", "tradeability_state"]
+preferred_horizon_days = [10, 30]
+normalization = ["cross_sectional", "winsorize", "zscore"]
+point_in_time_rule = "use_only_turnover_history_visible_at_trade_date_close"
+failure_modes = ["volume_exhaustion", "news_spike_reversal"]
+

@@ -1,0 +1,19 @@
+schema_version = 1
+artifact_type = "portfolio_backtest_case"
+case_id = "trend_only_portfolio_daily_backtest"
+description = "Daily portfolio-level trend-only baseline backtest on the same source DB and dates as the frozen overlay candidate."
+portfolio_path = "research/examples/deployment_minimal/trend_real_output_portfolio.toml"
+artifact_paths = [
+  "output/trend_leadership_core_artifact.json",
+]
+source_db_path = "output/research_source.duckdb"
+execution_policy_path = "config/execution_policies/a_share_next_open_v1.toml"
+default_cost_model_path = "config/cost_models/base_a_share_cash.toml"
+additional_cost_model_paths = [
+  "config/cost_models/high_a_share_cash.toml",
+]
+benchmark_state_path = "output/csi800_benchmark_state_history.json"
+start_date = "2021-03-05"
+end_date = "2026-03-19"
+initial_cash_cny = 10000000
+output_path = "output/trend_only_portfolio_daily_backtest.json"

@@ -1,0 +1,2 @@
+[console_scripts]
+alpha-find-v2 = alpha_find_v2.cli:main

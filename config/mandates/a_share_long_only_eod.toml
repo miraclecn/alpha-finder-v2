@@ -18,12 +18,13 @@ exclude_st = true
 exclude_suspended = true
 exclude_limit_up_locked = true
 exclude_limit_down_locked = true
+exclude_boards = ["beijing"]
 min_listing_days = 120
 min_median_daily_turnover_cny_mn = 30
 
 [risk]
-industry_neutral = true
-size_control = true
-beta_band = [0.85, 1.15]
+industry_neutral = { status = "enforced", evidence = "portfolio_industry_caps_and_pit_industry_labels" }
+size_control = { status = "planned", reason = "Requires an explicit size exposure model before it can be enforced." }
+beta_band = { status = "planned", band = [0.85, 1.15], reason = "Requires an explicit beta exposure model before it can be enforced." }
 max_industry_overweight = 0.10
 cash_buffer = 0.02
