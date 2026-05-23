@@ -2,10 +2,8 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 import json
-import os
 from pathlib import Path
 import subprocess
-import sys
 import tempfile
 import unittest
 
@@ -270,7 +268,7 @@ class RegimeOverlayObservationBuilderTest(unittest.TestCase):
 
             result = subprocess.run(
                 [
-                    sys.executable,
+                    "python3",
                     "-m",
                     "alpha_find_v2",
                     "build-regime-overlay-observations",
@@ -278,7 +276,7 @@ class RegimeOverlayObservationBuilderTest(unittest.TestCase):
                     str(case_path),
                 ],
                 cwd=PROJECT_ROOT,
-                env={**os.environ, "PYTHONPATH": "src"},
+                env={"PYTHONPATH": "src"},
                 capture_output=True,
                 text=True,
                 check=False,
@@ -481,11 +479,11 @@ class RegimeOverlayObservationBuilderTest(unittest.TestCase):
                     'artifact_type = "regime_overlay_observation_build_case"',
                     'case_id = "overlay_case"',
                     'description = "Build a reproducible regime overlay observation history."',
-                    f'overlay_path = "{(CONFIG_ROOT / "regime_overlays" / "a_share_risk_overlay.toml").as_posix()}"',
-                    f'source_db_path = "{source_db_path.as_posix()}"',
-                    f'benchmark_state_path = "{benchmark_state_path.as_posix()}"',
-                    f'trade_dates_artifact_path = "{sleeve_artifact_path.as_posix()}"',
-                    f'output_path = "{output_path.as_posix()}"',
+                    f'overlay_path = "{CONFIG_ROOT / "regime_overlays" / "a_share_risk_overlay.toml"}"',
+                    f'source_db_path = "{source_db_path}"',
+                    f'benchmark_state_path = "{benchmark_state_path}"',
+                    f'trade_dates_artifact_path = "{sleeve_artifact_path}"',
+                    f'output_path = "{output_path}"',
                     "trend_short_lookback_days = 2",
                     "trend_long_lookback_days = 3",
                     "breadth_return_lookback_days = 2",

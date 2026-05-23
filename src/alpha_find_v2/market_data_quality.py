@@ -553,11 +553,11 @@ def _unresolved_adj_factor_jump_triage(
                     u.trade_date_key,
                     bool_or(
                         r.ex_date_key = u.trade_date_key
-                        AND COALESCE(r.div_proc, '') <> '瀹炴柦'
+                        AND COALESCE(r.div_proc, '') <> '实施'
                     ) AS has_same_date_nonimplemented,
                     min(
                         CASE
-                            WHEN r.div_proc = '瀹炴柦' THEN abs(
+                            WHEN r.div_proc = '实施' THEN abs(
                                 date_diff(
                                     'day',
                                     strptime(r.ex_date_key, '%Y%m%d'),
@@ -712,15 +712,15 @@ def _unresolved_adj_factor_jump_examples(
                     {has_suspend_window_sql} AS has_suspend_window,
                     bool_or(
                         r.ex_date_key = u.trade_date_key
-                        AND r.div_proc = '瀹炴柦'
+                        AND r.div_proc = '实施'
                     ) AS has_same_date_implemented,
                     bool_or(
                         r.ex_date_key = u.trade_date_key
-                        AND COALESCE(r.div_proc, '') <> '瀹炴柦'
+                        AND COALESCE(r.div_proc, '') <> '实施'
                     ) AS has_same_date_nonimplemented,
                     min(
                         CASE
-                            WHEN r.div_proc = '瀹炴柦' THEN abs(
+                            WHEN r.div_proc = '实施' THEN abs(
                                 date_diff(
                                     'day',
                                     strptime(r.ex_date_key, '%Y%m%d'),
@@ -760,7 +760,7 @@ def _unresolved_adj_factor_jump_examples(
                 FROM unresolved AS u
                 INNER JOIN valid_raw_dividend AS r
                   ON r.security_id = u.security_id
-                 AND r.div_proc = '瀹炴柦'
+                 AND r.div_proc = '实施'
             )
             SELECT
                 c.security_id,
@@ -830,15 +830,15 @@ def _unresolved_adj_factor_jump_dividend_proximity(
                     u.trade_date_key,
                     bool_or(
                         r.ex_date_key = u.trade_date_key
-                        AND r.div_proc = '瀹炴柦'
+                        AND r.div_proc = '实施'
                     ) AS has_same_date_implemented,
                     bool_or(
                         r.ex_date_key = u.trade_date_key
-                        AND COALESCE(r.div_proc, '') <> '瀹炴柦'
+                        AND COALESCE(r.div_proc, '') <> '实施'
                     ) AS has_same_date_nonimplemented,
                     min(
                         CASE
-                            WHEN r.div_proc = '瀹炴柦' THEN abs(
+                            WHEN r.div_proc = '实施' THEN abs(
                                 date_diff(
                                     'day',
                                     strptime(r.ex_date_key, '%Y%m%d'),

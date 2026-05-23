@@ -1,8 +1,6 @@
 import json
-import os
 from pathlib import Path
 import subprocess
-import sys
 import tempfile
 import unittest
 
@@ -25,7 +23,7 @@ class DeploymentLayerTest(unittest.TestCase):
             case_text = (
                 (EXAMPLE_ROOT / "run_manifest_case.toml").read_text(encoding="utf-8").replace(
                     "research/examples/deployment_minimal/run_manifest_2026_04_20.json",
-                    manifest_path.as_posix(),
+                    str(manifest_path),
                 )
             )
             case_path = Path(temp_dir) / "run_manifest_case.toml"
@@ -33,7 +31,7 @@ class DeploymentLayerTest(unittest.TestCase):
 
             result = subprocess.run(
                 [
-                    sys.executable,
+                    "python3",
                     "-m",
                     "alpha_find_v2",
                     "build-run-manifest",
@@ -41,7 +39,7 @@ class DeploymentLayerTest(unittest.TestCase):
                     str(case_path),
                 ],
                 cwd=PROJECT_ROOT,
-                env={**os.environ, "PYTHONPATH": "src"},
+                env={"PYTHONPATH": "src"},
                 capture_output=True,
                 text=True,
                 check=False,
@@ -215,7 +213,7 @@ class DeploymentLayerTest(unittest.TestCase):
     def test_cli_evaluate_decay_watch_reports_realized_execution_trace(self) -> None:
         result = subprocess.run(
             [
-                sys.executable,
+                "python3",
                 "-m",
                 "alpha_find_v2",
                 "evaluate-decay-watch",
@@ -223,7 +221,7 @@ class DeploymentLayerTest(unittest.TestCase):
                 str(EXAMPLE_ROOT / "decay_watch_case_with_realized_window.toml"),
             ],
             cwd=PROJECT_ROOT,
-            env={**os.environ, "PYTHONPATH": "src"},
+            env={"PYTHONPATH": "src"},
             capture_output=True,
             text=True,
             check=False,
@@ -255,14 +253,14 @@ class DeploymentLayerTest(unittest.TestCase):
                 .read_text(encoding="utf-8")
                 .replace(
                     "research/examples/deployment_minimal/trend_leadership_live_candidate_v1.toml",
-                    bundle_path.as_posix(),
+                    str(bundle_path),
                 )
             )
             case_path.write_text(case_text, encoding="utf-8")
 
             result = subprocess.run(
                 [
-                    sys.executable,
+                    "python3",
                     "-m",
                     "alpha_find_v2",
                     "build-executable-signal",
@@ -270,7 +268,7 @@ class DeploymentLayerTest(unittest.TestCase):
                     str(case_path),
                 ],
                 cwd=PROJECT_ROOT,
-                env={**os.environ, "PYTHONPATH": "src"},
+                env={"PYTHONPATH": "src"},
                 capture_output=True,
                 text=True,
                 check=False,
@@ -290,7 +288,7 @@ class DeploymentLayerTest(unittest.TestCase):
     ) -> None:
         result = subprocess.run(
             [
-                sys.executable,
+                "python3",
                 "-m",
                 "alpha_find_v2",
                 "build-executable-signal",
@@ -301,7 +299,7 @@ class DeploymentLayerTest(unittest.TestCase):
                 ),
             ],
             cwd=PROJECT_ROOT,
-            env={**os.environ, "PYTHONPATH": "src"},
+            env={"PYTHONPATH": "src"},
             capture_output=True,
             text=True,
             check=False,
@@ -329,7 +327,7 @@ class DeploymentLayerTest(unittest.TestCase):
                 .read_text(encoding="utf-8")
                 .replace(
                     "research/examples/deployment_minimal/trend_leadership_live_candidate_v1.toml",
-                    bundle_path.as_posix(),
+                    str(bundle_path),
                 )
             )
             executable_case_path.write_text(executable_case_text, encoding="utf-8")
@@ -338,11 +336,11 @@ class DeploymentLayerTest(unittest.TestCase):
                 .read_text(encoding="utf-8")
                 .replace(
                     "research/examples/deployment_minimal/executable_signal_case_trend_live_candidate_with_overlay.toml",
-                    executable_case_path.as_posix(),
+                    str(executable_case_path),
                 )
                 .replace(
                     "research/examples/deployment_minimal/trend_live_candidate_run_manifest_2026_04_20.json",
-                    manifest_path.as_posix(),
+                    str(manifest_path),
                 )
             )
             case_path = temp_root / "run_manifest_case.toml"
@@ -350,7 +348,7 @@ class DeploymentLayerTest(unittest.TestCase):
 
             result = subprocess.run(
                 [
-                    sys.executable,
+                    "python3",
                     "-m",
                     "alpha_find_v2",
                     "build-run-manifest",
@@ -358,7 +356,7 @@ class DeploymentLayerTest(unittest.TestCase):
                     str(case_path),
                 ],
                 cwd=PROJECT_ROOT,
-                env={**os.environ, "PYTHONPATH": "src"},
+                env={"PYTHONPATH": "src"},
                 capture_output=True,
                 text=True,
                 check=False,
@@ -367,7 +365,7 @@ class DeploymentLayerTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, msg=result.stderr)
             payload = json.loads(result.stdout)
             self.assertEqual(payload["case_id"], "trend_live_candidate_run_manifest_2026_04_20")
-            self.assertEqual(Path(payload["output_path"]).resolve(), manifest_path.resolve())
+            self.assertEqual(payload["output_path"], str(manifest_path))
             written_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(
                 written_manifest["portfolio_id"],
@@ -383,7 +381,7 @@ class DeploymentLayerTest(unittest.TestCase):
                 .read_text(encoding="utf-8")
                 .replace(
                     "research/examples/deployment_minimal/trend_live_candidate_run_manifest_2026_04_20.json",
-                    manifest_path.as_posix(),
+                    str(manifest_path),
                 )
             )
             case_path = Path(temp_dir) / "run_manifest_case.toml"
@@ -391,7 +389,7 @@ class DeploymentLayerTest(unittest.TestCase):
 
             result = subprocess.run(
                 [
-                    sys.executable,
+                    "python3",
                     "-m",
                     "alpha_find_v2",
                     "build-run-manifest",
@@ -399,7 +397,7 @@ class DeploymentLayerTest(unittest.TestCase):
                     str(case_path),
                 ],
                 cwd=PROJECT_ROOT,
-                env={**os.environ, "PYTHONPATH": "src"},
+                env={"PYTHONPATH": "src"},
                 capture_output=True,
                 text=True,
                 check=False,
@@ -447,7 +445,7 @@ class DeploymentLayerTest(unittest.TestCase):
                 .read_text(encoding="utf-8")
                 .replace(
                     "research/examples/deployment_minimal/trend_leadership_multi_year_validation_audit_v1.json",
-                    audit_path.as_posix(),
+                    str(audit_path),
                 )
             )
             bundle_path.write_text(bundle_text, encoding="utf-8")
@@ -460,14 +458,14 @@ class DeploymentLayerTest(unittest.TestCase):
                 .read_text(encoding="utf-8")
                 .replace(
                     "research/examples/deployment_minimal/trend_leadership_live_candidate_v1.toml",
-                    bundle_path.as_posix(),
+                    str(bundle_path),
                 )
             )
             case_path.write_text(case_text, encoding="utf-8")
 
             result = subprocess.run(
                 [
-                    sys.executable,
+                    "python3",
                     "-m",
                     "alpha_find_v2",
                     "build-executable-signal",
@@ -475,7 +473,7 @@ class DeploymentLayerTest(unittest.TestCase):
                     str(case_path),
                 ],
                 cwd=PROJECT_ROOT,
-                env={**os.environ, "PYTHONPATH": "src"},
+                env={"PYTHONPATH": "src"},
                 capture_output=True,
                 text=True,
                 check=False,
@@ -512,7 +510,7 @@ class DeploymentLayerTest(unittest.TestCase):
             .read_text(encoding="utf-8")
             .replace(
                 "research/examples/deployment_minimal/trend_leadership_multi_year_validation_audit_v1.json",
-                audit_path.as_posix(),
+                str(audit_path),
             )
         )
         path.write_text(bundle_text, encoding="utf-8")

@@ -27,8 +27,13 @@ Its finance logic is:
 - single-name concentration is clipped at the portfolio cap
 - industry concentration is clipped relative to benchmark industry weights
 - any residual weight blocked by hard constraints remains cash
+- constructor diagnostics attribute that cash to name selection, single-name
+  caps, or benchmark-relative industry caps
 
 That last rule is deliberate. The first V2 constructor is not allowed to hide weak breadth or capital-allocation problems by quietly re-optimizing the book.
+Unsupported construction switches now fail fast: sleeve weights must come from
+the portfolio allocation, name selection is `top_weight`, overflow policy is
+`hold_cash`, and industry budgets are either blank or `benchmark_relative`.
 
 ## Object Boundary
 
@@ -66,6 +71,7 @@ The first constructor is not:
 - a mean-variance optimizer
 - a turnover-minimizing optimizer
 - a risk-parity allocator
+- a Barra-style size/beta neutralizer
 - a live execution scheduler
 
 Those may come later. First, V2 needs a testable and finance-legible bridge from sleeve outputs to a real portfolio target.

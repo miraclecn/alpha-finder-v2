@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import os
-import sys
-
 import json
 import math
 from pathlib import Path
@@ -1710,16 +1707,16 @@ schema_version = 1
 artifact_type = "portfolio_backtest_case"
 case_id = "synthetic_case"
 description = "Synthetic case."
-portfolio_path = "{portfolio_path.as_posix()}"
-artifact_paths = ["{artifact_path.as_posix()}"]
-source_db_path = "{db_path.as_posix()}"
+portfolio_path = "{portfolio_path}"
+artifact_paths = ["{artifact_path}"]
+source_db_path = "{db_path}"
 execution_policy_path = "config/execution_policies/a_share_next_open_v1.toml"
 default_cost_model_path = "config/cost_models/base_a_share_cash.toml"
-benchmark_state_path = "{benchmark_state_path.as_posix()}"
+benchmark_state_path = "{benchmark_state_path}"
 start_date = "2026-01-05"
 end_date = "2026-01-06"
 initial_cash_cny = 10000
-output_path = "{output_path.as_posix()}"
+output_path = "{output_path}"
 """.strip()
                 + "\n",
                 encoding="utf-8",
@@ -1730,7 +1727,7 @@ output_path = "{output_path.as_posix()}"
 
             process = subprocess.run(
                 [
-                    sys.executable,
+                    "python3",
                     "-m",
                     "alpha_find_v2",
                     "run-portfolio-backtest",
@@ -1738,7 +1735,7 @@ output_path = "{output_path.as_posix()}"
                     str(case_path),
                 ],
                 cwd=PROJECT_ROOT,
-                env={**os.environ, "PYTHONPATH": "src"},
+                env={"PYTHONPATH": "src"},
                 capture_output=True,
                 text=True,
                 check=False,

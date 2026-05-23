@@ -54,12 +54,19 @@ class LiveReadinessTest(unittest.TestCase):
                 load_live_candidate_bundle(temp_path)
 
     def test_shadow_live_journal_reports_current_gate_as_incomplete(self) -> None:
-        import unittest
-        if not Path("output/research_source.duckdb").exists():
-            self.skipTest("requires output/research_source.duckdb")
-        evaluation = evaluate_shadow_live_journal(
-            EXAMPLE_ROOT / "shadow_live_journal_trend_leadership_v1.json"
-        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            journal_path = Path(temp_dir) / "shadow_live_journal.json"
+            payload = json.loads(
+                (EXAMPLE_ROOT / "shadow_live_journal_trend_leadership_v1.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            payload.pop("source_db_path", None)
+            journal_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            evaluation = evaluate_shadow_live_journal(journal_path)
 
         self.assertEqual(evaluation.bundle.definition.candidate_id, "trend_leadership_shadow_live_v1")
         self.assertEqual(evaluation.summary.cycle_count, 1)
@@ -489,23 +496,33 @@ class LiveReadinessTest(unittest.TestCase):
         self.assertEqual(payload["status"], "shadow_live_eligible")
 
     def test_cli_evaluate_shadow_live_journal_reports_gate_status(self) -> None:
-        if not Path("output/research_source.duckdb").exists():
-            self.skipTest("requires output/research_source.duckdb")
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "alpha_find_v2",
-                "evaluate-shadow-live-journal",
-                "--path",
-                str(EXAMPLE_ROOT / "shadow_live_journal_trend_leadership_v1.json"),
-            ],
-            cwd=PROJECT_ROOT,
-            env={**os.environ, "PYTHONPATH": "src"},
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            journal_path = Path(temp_dir) / "shadow_live_journal.json"
+            payload = json.loads(
+                (EXAMPLE_ROOT / "shadow_live_journal_trend_leadership_v1.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            payload.pop("source_db_path", None)
+            journal_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "alpha_find_v2",
+                    "evaluate-shadow-live-journal",
+                    "--path",
+                    str(journal_path),
+                ],
+                cwd=PROJECT_ROOT,
+                env={**os.environ, "PYTHONPATH": "src"},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
@@ -746,9 +763,9 @@ class LiveReadinessTest(unittest.TestCase):
             case_path = self._write_multi_year_audit_case(
                 temp_root=temp_root,
                 candidate_id="overlay_candidate_test",
-                portfolio_path=candidate_portfolio_path.as_posix(),
-                replay_case_path=replay_case_path.as_posix(),
-                portfolio_backtest_result_path=backtest_path.as_posix(),
+                portfolio_path=str(candidate_portfolio_path),
+                replay_case_path=str(replay_case_path),
+                portfolio_backtest_result_path=str(backtest_path),
             )
 
             loaded_case = load_multi_year_validation_audit_build_case(case_path)
@@ -789,8 +806,8 @@ class LiveReadinessTest(unittest.TestCase):
             case_path = self._write_multi_year_audit_case(
                 temp_root=temp_root,
                 candidate_id="overlay_candidate_test",
-                portfolio_path=candidate_portfolio_path.as_posix(),
-                replay_case_path=replay_case_path.as_posix(),
+                portfolio_path=str(candidate_portfolio_path),
+                replay_case_path=str(replay_case_path),
             )
 
             loaded_case = load_multi_year_validation_audit_build_case(case_path)
@@ -844,9 +861,9 @@ class LiveReadinessTest(unittest.TestCase):
             case_path = self._write_multi_year_audit_case(
                 temp_root=temp_root,
                 candidate_id="overlay_candidate_test",
-                portfolio_path=candidate_portfolio_path.as_posix(),
-                replay_case_path=replay_case_path.as_posix(),
-                portfolio_backtest_result_path=backtest_path.as_posix(),
+                portfolio_path=str(candidate_portfolio_path),
+                replay_case_path=str(replay_case_path),
+                portfolio_backtest_result_path=str(backtest_path),
             )
 
             loaded_case = load_multi_year_validation_audit_build_case(case_path)
@@ -995,7 +1012,7 @@ class LiveReadinessTest(unittest.TestCase):
         target.write_text(
             source.read_text(encoding="utf-8").replace(
                 'multi_year_validation_audit_path = "research/examples/deployment_minimal/trend_leadership_multi_year_validation_audit_v1.json"',
-                f'multi_year_validation_audit_path = "{audit_path.as_posix()}"',
+                f'multi_year_validation_audit_path = "{audit_path}"',
             ),
             encoding="utf-8",
         )
@@ -1119,9 +1136,9 @@ class LiveReadinessTest(unittest.TestCase):
             'description = "Build a test audit from local benchmark and trend artifacts."',
             f'candidate_id = "{candidate_id}"',
             f'portfolio_path = "{portfolio_path}"',
-            f'benchmark_state_build_case_path = "{benchmark_case_path.as_posix()}"',
-            f'trend_research_input_build_case_path = "{trend_case_path.as_posix()}"',
-            f'output_path = "{output_path.as_posix()}"',
+            f'benchmark_state_build_case_path = "{benchmark_case_path}"',
+            f'trend_research_input_build_case_path = "{trend_case_path}"',
+            f'output_path = "{output_path}"',
             "minimum_calendar_years = 5.0",
             'as_of_date = "2026-04-26"',
         ]
@@ -1196,8 +1213,8 @@ class LiveReadinessTest(unittest.TestCase):
                     'artifact_type = "benchmark_state_build_case"',
                     'case_id = "benchmark_case"',
                     'description = "Test benchmark state build case."',
-                    f'source_db_path = "{source_db_path.as_posix()}"',
-                    f'output_path = "{benchmark_artifact_path.as_posix()}"',
+                    f'source_db_path = "{source_db_path}"',
+                    f'output_path = "{benchmark_artifact_path}"',
                     'benchmark_id = "CSI 800"',
                     'industry_schema = "sw2021_l1"',
                     'start_date = "2026-04-06"',
@@ -1363,8 +1380,8 @@ class LiveReadinessTest(unittest.TestCase):
                     'case_id = "trend_case"',
                     'description = "Test trend build case."',
                     'sleeve_path = "config/sleeves/trend_leadership_core.toml"',
-                    f'source_db_path = "{source_db_path.as_posix()}"',
-                    f'output_path = "{trend_input_path.as_posix()}"',
+                    f'source_db_path = "{source_db_path}"',
+                    f'output_path = "{trend_input_path}"',
                     'start_date = "2026-04-06"',
                     'end_date = "2026-04-20"',
                     "min_listing_days = 120",
@@ -1450,11 +1467,11 @@ class LiveReadinessTest(unittest.TestCase):
                     'artifact_type = "portfolio_promotion_replay_case"',
                     'case_id = "overlay_replay_case"',
                     'description = "Replay a multi-sleeve overlay candidate for audit testing."',
-                    f'baseline_portfolio_path = "{baseline_portfolio_path.as_posix()}"',
-                    f'candidate_portfolio_path = "{candidate_portfolio_path.as_posix()}"',
+                    f'baseline_portfolio_path = "{baseline_portfolio_path}"',
+                    f'candidate_portfolio_path = "{candidate_portfolio_path}"',
                     'default_cost_model_path = "config/cost_models/base_a_share_cash.toml"',
                     'additional_cost_model_paths = ["config/cost_models/high_a_share_cash.toml"]',
-                    f'benchmark_state_path = "{benchmark_state_path.as_posix()}"',
+                    f'benchmark_state_path = "{benchmark_state_path}"',
                     'regime_overlay_observation_path = "research/examples/promotion_replay_minimal/regime_overlay_observations.json"',
                     'artifact_paths = [',
                     '  "research/examples/promotion_replay_minimal/sleeve_artifacts/trend_leadership_core.json",',

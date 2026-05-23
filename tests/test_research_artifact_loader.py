@@ -1,8 +1,6 @@
 import json
-import os
 from pathlib import Path
 import subprocess
-import sys
 import tempfile
 import unittest
 
@@ -142,7 +140,7 @@ class ResearchArtifactLoaderTest(unittest.TestCase):
     def test_cli_run_promotion_replay_separates_research_evidence_from_gate_output(self) -> None:
         result = subprocess.run(
             [
-                sys.executable,
+                "python3",
                 "-m",
                 "alpha_find_v2",
                 "run-promotion-replay",
@@ -150,7 +148,7 @@ class ResearchArtifactLoaderTest(unittest.TestCase):
                 str(EXAMPLE_ROOT / "replay_case.toml"),
             ],
             cwd=PROJECT_ROOT,
-            env={**os.environ, "PYTHONPATH": "src"},
+            env={"PYTHONPATH": "src"},
             capture_output=True,
             text=True,
             check=False,
@@ -262,7 +260,7 @@ class ResearchArtifactLoaderTest(unittest.TestCase):
                 conn.close()
             case_path = temp_root / "replay_case.toml"
             case_path.write_text(
-                case_text.format(db_path=db_path.as_posix()),
+                case_text.format(db_path=db_path),
                 encoding="utf-8",
             )
 
@@ -337,13 +335,13 @@ max_industry_overweight = 0.30
                         'artifact_type = "portfolio_promotion_replay_case"',
                         'case_id = "mixed_target_validation"',
                         'description = "Reject replay cases that mix incompatible target labels."',
-                        f'baseline_portfolio_path = "{baseline_path.as_posix()}"',
-                        f'candidate_portfolio_path = "{candidate_path.as_posix()}"',
-                        f'default_cost_model_path = "{(CONFIG_ROOT / "cost_models" / "base_a_share_cash.toml").as_posix()}"',
-                        f'benchmark_state_path = "{(EXAMPLE_ROOT / "benchmark_state_history.json").as_posix()}"',
+                        f'baseline_portfolio_path = "{baseline_path}"',
+                        f'candidate_portfolio_path = "{candidate_path}"',
+                        f'default_cost_model_path = "{CONFIG_ROOT / "cost_models" / "base_a_share_cash.toml"}"',
+                        f'benchmark_state_path = "{EXAMPLE_ROOT / "benchmark_state_history.json"}"',
                         'artifact_paths = [',
-                        f'  "{(EXAMPLE_ROOT / "sleeve_artifacts" / "fundamental_rerating_core.json").as_posix()}",',
-                        f'  "{(EXAMPLE_ROOT / "sleeve_artifacts" / "trend_leadership_core.json").as_posix()}",',
+                        f'  "{EXAMPLE_ROOT / "sleeve_artifacts" / "fundamental_rerating_core.json"}",',
+                        f'  "{EXAMPLE_ROOT / "sleeve_artifacts" / "trend_leadership_core.json"}",',
                         ']',
                         'periods_per_year = 52',
                     ]
@@ -395,12 +393,12 @@ max_industry_overweight = 0.30
                         'artifact_type = "portfolio_promotion_replay_case"',
                         'case_id = "staggered_weekly_validation"',
                         'description = "Infer tranche counts from staggered policy and target horizon."',
-                        f'baseline_portfolio_path = "{baseline_path.as_posix()}"',
-                        f'candidate_portfolio_path = "{candidate_path.as_posix()}"',
-                        f'default_cost_model_path = "{(CONFIG_ROOT / "cost_models" / "base_a_share_cash.toml").as_posix()}"',
-                        f'benchmark_state_path = "{(EXAMPLE_ROOT / "benchmark_state_history.json").as_posix()}"',
+                        f'baseline_portfolio_path = "{baseline_path}"',
+                        f'candidate_portfolio_path = "{candidate_path}"',
+                        f'default_cost_model_path = "{CONFIG_ROOT / "cost_models" / "base_a_share_cash.toml"}"',
+                        f'benchmark_state_path = "{EXAMPLE_ROOT / "benchmark_state_history.json"}"',
                         'artifact_paths = [',
-                        f'  "{(EXAMPLE_ROOT / "sleeve_artifacts" / "fundamental_rerating_core.json").as_posix()}",',
+                        f'  "{EXAMPLE_ROOT / "sleeve_artifacts" / "fundamental_rerating_core.json"}",',
                         ']',
                         'periods_per_year = 52',
                     ]

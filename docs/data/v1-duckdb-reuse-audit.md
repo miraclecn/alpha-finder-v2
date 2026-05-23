@@ -217,7 +217,7 @@ Triage:
 | Class | Rows | Securities | Interpretation |
 | --- | ---: | ---: | --- |
 | `implemented_dividend_outside_factor_window` | 6 | 6 | nearby official dividend exists but not in the factor-jump bar window |
-| `nonimplemented_dividend_same_date` | 1 | 1 | raw dividend exists but is not `div_proc='瀹炴柦'` |
+| `nonimplemented_dividend_same_date` | 1 | 1 | raw dividend exists but is not `div_proc='实施'` |
 | `daily_pre_close_ex_right_without_ledger` | 100 | 94 | Tushare daily `pre_close` and `adj_factor` agree on an ex-right adjustment, but no bookable action is staged |
 | `low_materiality_provider_factor_noise` | 5 | 1 | sub-50bp factor-only source noise |
 | `provider_factor_jump_without_event_evidence` | 10 | 4 | factor changed without dividend or `pre_close` support |
@@ -388,8 +388,8 @@ Unresolved adjustment-factor jumps by year:
 Persisted audit reconciliation against staged `raw_dividend` shows:
 
 - same-date non-implemented raw dividend only: `1` row
-- implemented raw dividend within `卤30` calendar days: `6` rows
-- no implemented raw dividend within `卤30` calendar days: `115` rows
+- implemented raw dividend within `±30` calendar days: `6` rows
+- no implemented raw dividend within `±30` calendar days: `115` rows
 
 Persisted exception triage shows:
 
@@ -405,7 +405,7 @@ Interpretation:
   action fell during a suspension/no-bar interval and the factor jump only
   appeared on the next available bar
 - the remaining `122` rows are not explained by ordinary implemented dividend
-  timing; `115` have no implemented dividend within `卤30` calendar days
+  timing; `115` have no implemented dividend within `±30` calendar days
 - these `122` rows are now explicit `corporate_action_exception_ledger` rows,
   not hidden residuals; generated research inputs exclude affected
   security/windows before artifact creation, promotion/live-release gates block

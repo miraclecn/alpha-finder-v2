@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -229,7 +227,7 @@ class MarketDataQualityTest(unittest.TestCase):
 
             result = subprocess.run(
                 [
-                    sys.executable,
+                    "python3",
                     "-m",
                     "alpha_find_v2",
                     "audit-market-data-quality",
@@ -239,7 +237,7 @@ class MarketDataQualityTest(unittest.TestCase):
                     str(output_path),
                 ],
                 cwd=Path(__file__).resolve().parents[1],
-                env={**os.environ, "PYTHONPATH": "src"},
+                env={"PYTHONPATH": "src"},
                 capture_output=True,
                 text=True,
                 check=False,
@@ -248,10 +246,7 @@ class MarketDataQualityTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, msg=result.stderr)
             self.assertTrue(output_path.exists())
             payload = json.loads(output_path.read_text(encoding="utf-8"))
-            # Compare resolved paths to handle Windows short-name vs long-name variation
-            self.assertEqual(
-                Path(payload["source_db"]).resolve(), db_path.resolve()
-            )
+            self.assertEqual(payload["source_db"], str(db_path))
             self.assertEqual(payload["summary"]["daily_bar_rows"], 14)
             self.assertEqual(payload["summary"]["tradeability_official_rows"], 2)
             self.assertEqual(payload["summary"]["tradeability_ohlc_fallback_rows"], 1)
@@ -423,8 +418,8 @@ class MarketDataQualityTest(unittest.TestCase):
             conn.execute(
                 """
                 INSERT INTO raw_dividend VALUES
-                ('AAA', '瀹炴柦', '20240106'),
-                ('GGG', '棰勬', '20240103')
+                ('AAA', '实施', '20240106'),
+                ('GGG', '预案', '20240103')
                 """
             )
         finally:

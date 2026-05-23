@@ -391,6 +391,57 @@ def _parse_args() -> argparse.Namespace:
         help="Path to the fundamental-research input build-case TOML file.",
     )
 
+    validate_residual_snapshot = subparsers.add_parser(
+        "validate-residual-snapshot",
+        help="Validate the external residual component snapshot intake contract.",
+    )
+    validate_residual_snapshot.add_argument(
+        "--path",
+        default="output/open_t1_to_open_t20_residual_component_snapshot.json",
+        help="Path to the residual component snapshot JSON file.",
+    )
+    validate_residual_snapshot.add_argument(
+        "--target-path",
+        default=str(CONFIG_ROOT / "targets" / "open_t1_to_open_t20_residual_net_cost.toml"),
+        help="Path to the residual target TOML file.",
+    )
+    validate_residual_snapshot.add_argument(
+        "--required-coverage-path",
+        default=(
+            "research/examples/promotion_replay_real_output_residual/"
+            "residual_snapshot_required_coverage.json"
+        ),
+        help="Path to the machine-readable required coverage manifest.",
+    )
+
+    build_residual_snapshot_required_coverage = subparsers.add_parser(
+        "build-residual-snapshot-required-coverage",
+        help="Rebuild the machine-readable required coverage manifest for the residual replay lane.",
+    )
+    build_residual_snapshot_required_coverage.add_argument(
+        "--fundamental-case",
+        default="research/examples/fundamental_input_build_minimal/fundamental_rerating_core.toml",
+        help="Path to the slower fundamental residual build-case TOML file.",
+    )
+    build_residual_snapshot_required_coverage.add_argument(
+        "--trend-case",
+        default="research/examples/trend_input_build_minimal/trend_leadership_core_residual.toml",
+        help="Path to the residualized trend comparator build-case TOML file.",
+    )
+    build_residual_snapshot_required_coverage.add_argument(
+        "--output-path",
+        default=(
+            "research/examples/promotion_replay_real_output_residual/"
+            "residual_snapshot_required_coverage.json"
+        ),
+        help="Path to write the machine-readable required coverage manifest.",
+    )
+    build_residual_snapshot_required_coverage.add_argument(
+        "--as-of-date",
+        default=date.today().isoformat(),
+        help="As-of date to record in the generated coverage manifest.",
+    )
+
     build_benchmark_state = subparsers.add_parser(
         "build-benchmark-state",
         help="Build a PIT benchmark_state_history artifact from the isolated V2 DuckDB.",
@@ -481,6 +532,11 @@ def _parse_args() -> argparse.Namespace:
         help="Path to the portfolio-backtest case TOML file.",
     )
 
+    subparsers.add_parser(
+        "validate-backtester",
+        help="Run the internal backtester qualification suite.",
+    )
+
     validate_live_candidate_bundle = subparsers.add_parser(
         "validate-live-candidate-bundle",
         help="Validate a frozen live-candidate bundle for shadow-live use.",
@@ -522,6 +578,16 @@ def _parse_args() -> argparse.Namespace:
             "trend_leadership_multi_year_validation_audit_v1.toml"
         ),
         help="Path to the multi-year validation audit build-case TOML file.",
+    )
+
+    validate_generated_strategy = subparsers.add_parser(
+        "validate-generated-strategy",
+        help="Validate a generated strategy manifest before promotion review.",
+    )
+    validate_generated_strategy.add_argument(
+        "--manifest",
+        required=True,
+        help="Path to a generated_strategy_manifest JSON file.",
     )
 
     # ---- Data ingestion commands ----------------------------------------
@@ -913,6 +979,85 @@ def main() -> None:
         )
         return
 
+    if args.command == "validate-residual-snapshot":
+        from .fundamental_research_input_builder import (
+            _load_required_residual_snapshot_coverage,
+            validate_residual_component_snapshot_intake,
+        )
+
+        target = load_target(Path(args.target_path))
+        required_coverage_path = (
+            Path(args.required_coverage_path) if args.required_coverage_path else None
+        )
+        validated_snapshot = validate_residual_component_snapshot_intake(
+            path=Path(args.path),
+            target_id=target.id,
+            risk_model_id=target.risk_model_id,
+            required_components=list(target.residualization),
+            required_coverage_path=required_coverage_path,
+        )
+        required_coverage_observation_count = (
+            len(
+                _load_required_residual_snapshot_coverage(
+                    path=required_coverage_path,
+                    target_id=target.id,
+                )
+            )
+            if required_coverage_path is not None
+            else 0
+        )
+        _dump_json(
+            {
+                "path": validated_snapshot.path,
+                "target_id": validated_snapshot.target_id,
+                "risk_model_id": validated_snapshot.risk_model_id,
+                "required_components": validated_snapshot.required_components,
+                "step_count": validated_snapshot.step_count,
+                "record_count": validated_snapshot.record_count,
+                "required_coverage_observation_count": required_coverage_observation_count,
+                "required_coverage_path": (
+                    str(required_coverage_path)
+                    if required_coverage_path is not None
+                    else ""
+                ),
+                "provenance": validated_snapshot.provenance,
+                "status": "validated",
+            }
+        )
+        return
+
+    if args.command == "build-residual-snapshot-required-coverage":
+        from .residual_snapshot_required_coverage_builder import (
+            build_residual_snapshot_required_coverage,
+            write_residual_snapshot_required_coverage,
+        )
+
+        result = build_residual_snapshot_required_coverage(
+            fundamental_case_path=Path(args.fundamental_case),
+            trend_case_path=Path(args.trend_case),
+            as_of_date=args.as_of_date,
+        )
+        output_path = write_residual_snapshot_required_coverage(
+            result,
+            Path(args.output_path),
+        )
+        _dump_json(
+            {
+                "output_path": str(output_path),
+                "target_id": result.target_id,
+                "source_db_path": result.source_db_path,
+                "fundamental_case_path": result.fundamental_case_path,
+                "trend_case_path": result.trend_case_path,
+                "trade_dates": result.trade_dates,
+                "decision_date_count": len(result.trade_dates),
+                "fundamental_observation_count": result.fundamental_observation_count,
+                "trend_observation_count": result.trend_observation_count,
+                "required_union_observation_count": result.required_union_observation_count,
+                "required_union_asset_count": result.required_union_asset_count,
+            }
+        )
+        return
+
     if args.command == "build-benchmark-state":
         loaded_case = load_benchmark_state_build_case(Path(args.case))
         artifact = build_benchmark_state_artifact(loaded_case)
@@ -1046,6 +1191,12 @@ def main() -> None:
         )
         return
 
+    if args.command == "validate-backtester":
+        from .backtester_validation import run_backtester_validation_suite
+
+        _dump_json(asdict(run_backtester_validation_suite()))
+        return
+
     if args.command == "build-run-manifest":
         loaded_case = load_run_manifest_case(Path(args.case))
         if loaded_case.executable_signal_case.definition.live_candidate_bundle_path:
@@ -1086,6 +1237,25 @@ def main() -> None:
                     "artifact_type": "run_manifest",
                     **asdict(manifest),
                 },
+            }
+        )
+        return
+
+    if args.command == "validate-generated-strategy":
+        from .strategy_generation_guardrails import validate_generated_strategy_manifest
+
+        result = validate_generated_strategy_manifest(Path(args.manifest))
+        _dump_json(
+            {
+                "strategy_id": result.manifest.strategy_id,
+                "status": "validated",
+                "objectives": result.manifest.objectives,
+                "rejected_objectives": result.rejected_objectives,
+                "promotion_review_requested": result.manifest.promotion_review_requested,
+                "promotion_review_allowed": result.promotion_review_allowed,
+                "bound_ids": result.bound_ids,
+                "evidence_paths": result.evidence_paths,
+                "blockers": result.blockers,
             }
         )
         return

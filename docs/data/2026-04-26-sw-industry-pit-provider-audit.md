@@ -19,7 +19,7 @@
   allowed to become production truth without a separate field audit.
 - The local Shenwan-research export
   `docs/data/StockClassifyUse_stock.xls` is a strong external change-node
-  source. It contains `鑲＄エ浠ｇ爜`, `璁″叆鏃ユ湡`, `琛屼笟浠ｇ爜`, and `鏇存柊鏃ユ湡`, with
+  source. It contains `股票代码`, `计入日期`, `行业代码`, and `更新日期`, with
   `12,773` rows across `5,855` stocks and `553` industry codes, and it
   includes large node clusters on both `2014-02-21` and `2021-07-30`.
 - The official local Shenwan 2021 support files materially strengthen that
@@ -30,7 +30,7 @@
     launch date and the old/new taxonomy revision logic
   - `docs/data/2014to2021.xlsx` provides the official `2014 -> 2021`
     taxonomy crosswalk in both change-note and old/new comparison forms
-  - `docs/data/鏈€鏂颁釜鑲＄敵涓囪涓氬垎绫?瀹屾暣鐗?鎴嚦7鏈堟湯).xlsx` provides a full
+  - `docs/data/最新个股申万行业分类(完整版-截至7月末).xlsx` provides a full
     official cross-section around the `2021-07-30` cutover, including
     `4,430` A-share rows
 - `docs/data/2014to2021.xlsx` is taxonomy-transition evidence, not stock-level
@@ -38,7 +38,7 @@
   around the `2021-07-30` cutover, but it does not itself provide per-stock
   `in_date` / `out_date`.
 - `Baostock query_stock_industry()` is not a valid replacement for this audit
-  path. Live checks show it returns `璇佺洃浼氳涓氬垎绫籤, not `SW2021`, and the
+  path. Live checks show it returns `证监会行业分类`, not `SW2021`, and the
   returned `updateDate` is a weekly snapshot date rather than a daily PIT
   interval surface.
 - A `SW2021` row with an early `in_date` is useful continuity evidence for a
@@ -78,22 +78,22 @@ Important comparison limit:
   vocabulary in this audit. The one-shot script uses `AKShare` only as
   stock-date coverage evidence, not as direct code-equality truth.
 - The Shenwan-research export does not expose explicit `out_date` rows. It is
-  still useful because consecutive `璁″叆鏃ユ湡` values can define change nodes,
+  still useful because consecutive `计入日期` values can define change nodes,
   but interval end points must be derived conservatively.
 - The Shenwan-research export also needs two explicit guards before it can
   participate in any production-truth path:
-  - `2,173` rows carry non-midnight timestamps in `璁″叆鏃ユ湡`, so same-day use
+  - `2,173` rows carry non-midnight timestamps in `计入日期`, so same-day use
     would need an explicit `available_at` policy
-  - `12` rows use a `1990-01-01` placeholder `璁″叆鏃ユ湡`, so those left-edge
+  - `12` rows use a `1990-01-01` placeholder `计入日期`, so those left-edge
     starts are not automatically PIT-safe
 - The Shenwan official packet is now strong enough to support a stricter
   conclusion:
   - using `StockClassifyUse_stock.xls`, every A-share row in the official
-    `鎴嚦7鏈堟湯` snapshot can be reconstructed by taking the latest node with
-    `璁″叆鏃ユ湡 <= 2021-07-30`
+    `截至7月末` snapshot can be reconstructed by taking the latest node with
+    `计入日期 <= 2021-07-30`
   - this yields `100%` stock-level coverage (`4,430 / 4,430`)
   - after normalizing one lowercase snapshot code (`300957.sz ->
-    300957.SZ`), raw `琛屼笟浠ｇ爜` equality is `95.5079%` (`4,231 / 4,430`)
+    300957.SZ`), raw `行业代码` equality is `95.5079%` (`4,231 / 4,430`)
   - the new official crosswalk file `2014to2021.xlsx` explains most of the
     remaining raw-code disagreement:
     - `199` raw mismatches remain after the case normalization
@@ -129,8 +129,8 @@ Important comparison limit:
   source?" but "how do we operationalize it safely?":
   - normalize official code aliases across the packet
   - quarantine the small residual outlier set
-  - define `available_at` for intraday `璁″叆鏃ユ湡` timestamps
-  - derive interval end points conservatively from the next `璁″叆鏃ユ湡`
+  - define `available_at` for intraday `计入日期` timestamps
+  - derive interval end points conservatively from the next `计入日期`
 - The practical finance conclusion is now narrower and stronger:
   - for slow-moving uses such as benchmark grouping, industry exposure,
     neutralization, or the current `sw2021_l1` trend sleeve, the official
@@ -138,7 +138,7 @@ Important comparison limit:
   - it is still not enough to claim exact same-day reclassification-event
     truth without explicit `out_date` derivation and `available_at` rules
 - `Baostock` may still be useful as an external sanity check for slow-moving
-  industry continuity at the `璇佺洃浼氳涓氬垎绫籤 level, but it cannot close
+  industry continuity at the `证监会行业分类` level, but it cannot close
   `SW2021` PIT gaps and is therefore outside the primary reconciliation chain.
 
 ## Derived Bridge-Fill Policy
