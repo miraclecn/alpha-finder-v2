@@ -284,6 +284,14 @@ def build_research_source_db(
             "weight",
         },
     )
+    imported_index_basic = _materialize_optional_index_reference_table(
+        conn,
+        table_name="index_basic_ref",
+    )
+    imported_raw_index_daily = _materialize_optional_index_reference_table(
+        conn,
+        table_name="raw_index_daily",
+    )
     imported_raw_dividend = _materialize_optional_raw_event_table(
         conn,
         table_name="raw_dividend",
@@ -311,6 +319,8 @@ def build_research_source_db(
         imported_raw_stk_limit=imported_raw_stk_limit,
         imported_raw_suspend_d=imported_raw_suspend_d,
     )
+    if imported_raw_index_daily:
+        _build_index_daily_bar_pit(conn)
 
     conn.execute(
         """
@@ -439,6 +449,34 @@ def build_research_source_db(
             FROM industry_classification_pit
             """
         )
+    if imported_index_basic:
+        conn.execute(
+            """
+            INSERT INTO dataset_registry
+            SELECT
+                'index_basic_ref',
+                'green',
+                'staged benchmark index metadata for V2 benchmark and regime research',
+                COUNT(*),
+                MIN(list_date),
+                MAX(list_date)
+            FROM index_basic_ref
+            """
+        )
+    if imported_raw_index_daily:
+        conn.execute(
+            """
+            INSERT INTO dataset_registry
+            SELECT
+                'index_daily_bar_pit',
+                'green',
+                'staged benchmark index daily bars for V2 benchmark and anomaly research',
+                COUNT(*),
+                MIN(trade_date),
+                MAX(trade_date)
+            FROM index_daily_bar_pit
+            """
+        )
     _write_data_spine_registry(
         conn,
         source_path=source_path,
@@ -538,6 +576,67 @@ def _materialize_optional_pit_table(
         return True
 
     raise ValueError(f"Unsupported optional PIT table import: {table_name}")
+
+
+def _materialize_optional_index_reference_table(
+    conn: Any,
+    *,
+    table_name: str,
+) -> bool:
+    source_alias = _preferred_attached_source(conn, table_name)
+    if source_alias is None:
+        return False
+
+    columns = _table_columns(conn, source_alias, table_name)
+    required_columns = _index_reference_required_columns(table_name)
+    missing_columns = sorted(required_columns - columns)
+    if missing_columns:
+        raise ValueError(
+            f"{source_alias}.{table_name} is missing required columns: {', '.join(missing_columns)}"
+        )
+
+    if table_name == "index_basic_ref":
+        conn.execute(
+            f"""
+            CREATE OR REPLACE TABLE index_basic_ref AS
+            SELECT
+                CAST(ts_code AS VARCHAR) AS ts_code,
+                CAST(name AS VARCHAR) AS name,
+                CAST(market AS VARCHAR) AS market,
+                CAST(publisher AS VARCHAR) AS publisher,
+                CAST(category AS VARCHAR) AS category,
+                NULLIF(CAST(base_date AS VARCHAR), '') AS base_date,
+                CAST(base_point AS DOUBLE) AS base_point,
+                NULLIF(CAST(list_date AS VARCHAR), '') AS list_date
+            FROM {source_alias}.index_basic_ref
+            """
+        )
+        return True
+
+    if table_name == "raw_index_daily":
+        conn.execute(
+            f"""
+            CREATE OR REPLACE TABLE raw_index_daily AS
+            SELECT
+                CAST(ts_code AS VARCHAR) AS ts_code,
+                CAST(trade_date AS VARCHAR) AS trade_date,
+                CAST(close AS DOUBLE) AS close,
+                CAST(open AS DOUBLE) AS open,
+                CAST(high AS DOUBLE) AS high,
+                CAST(low AS DOUBLE) AS low,
+                CAST(pre_close AS DOUBLE) AS pre_close,
+                CAST(change AS DOUBLE) AS change,
+                CAST(pct_chg AS DOUBLE) AS pct_chg,
+                CAST(vol AS DOUBLE) AS vol,
+                CAST(amount AS DOUBLE) AS amount,
+                COALESCE(CAST(source_table AS VARCHAR), 'raw_index_daily') AS source_table,
+                ingested_at
+            FROM {source_alias}.raw_index_daily
+            """
+        )
+        return True
+
+    raise ValueError(f"Unsupported optional index reference table import: {table_name}")
 
 
 def _materialize_optional_raw_event_table(
@@ -649,6 +748,37 @@ def _materialize_optional_raw_event_table(
         )
         return True
     raise ValueError(f"Unsupported optional raw event table import: {table_name}")
+
+
+def _index_reference_required_columns(table_name: str) -> set[str]:
+    if table_name == "index_basic_ref":
+        return {
+            "ts_code",
+            "name",
+            "market",
+            "publisher",
+            "category",
+            "base_date",
+            "base_point",
+            "list_date",
+        }
+    if table_name == "raw_index_daily":
+        return {
+            "ts_code",
+            "trade_date",
+            "close",
+            "open",
+            "high",
+            "low",
+            "pre_close",
+            "change",
+            "pct_chg",
+            "vol",
+            "amount",
+            "source_table",
+            "ingested_at",
+        }
+    raise ValueError(f"Unsupported optional index reference table: {table_name}")
 
 
 def _create_empty_raw_event_table(conn: Any, table_name: str) -> None:
@@ -772,6 +902,29 @@ def _raw_event_required_columns(table_name: str) -> set[str]:
             *common,
         }
     raise ValueError(f"Unsupported raw event table: {table_name}")
+
+
+def _build_index_daily_bar_pit(conn: Any) -> None:
+    conn.execute(
+        """
+        CREATE OR REPLACE TABLE index_daily_bar_pit AS
+        SELECT
+            ts_code AS index_code,
+            trade_date,
+            open,
+            high,
+            low,
+            close,
+            pre_close,
+            change,
+            pct_chg,
+            vol AS volume,
+            amount AS turnover_value,
+            source_table,
+            ingested_at
+        FROM raw_index_daily
+        """
+    )
 
 
 def _nullable_varchar_sql(column_name: str) -> str:
@@ -1259,6 +1412,18 @@ def _write_data_boundary_registry(conn: Any) -> None:
                 "benchmark_weight_snapshot_pit",
                 "allow",
                 "staged provider benchmark weights may enter V2 only through the PIT staging chain",
+            ),
+            (
+                "allowed_reuse",
+                "index_daily_bar_pit",
+                "allow",
+                "staged benchmark index daily bars may feed V2 benchmark and market-regime research",
+            ),
+            (
+                "allowed_reuse",
+                "index_basic_ref",
+                "allow",
+                "staged benchmark index metadata may define benchmark identity inside the V2 staging chain",
             ),
             (
                 "allowed_reuse",

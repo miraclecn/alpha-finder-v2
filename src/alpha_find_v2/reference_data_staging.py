@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from numbers import Integral, Real
 import os
 from pathlib import Path
 import time
@@ -115,6 +116,16 @@ def build_tushare_reference_db(
     if client is None:
         client = _build_tushare_client(load_tushare_token(token))
 
+    index_basic_rows = _fetch_index_basic_rows(
+        client=client,
+        benchmarks=benchmarks,
+    )
+    index_daily_rows = _fetch_index_daily_rows(
+        client=client,
+        benchmarks=benchmarks,
+        start_date=start_date,
+        end_date=end_date,
+    )
     member_records = _fetch_index_member_all_records(
         client=client,
         page_size=member_page_size,
@@ -156,6 +167,8 @@ def build_tushare_reference_db(
     target_path.parent.mkdir(parents=True, exist_ok=True)
     _write_reference_db(
         target_path=target_path,
+        index_basic_rows=index_basic_rows,
+        raw_index_daily_rows=index_daily_rows,
         industry_rows=industry_rows,
         membership_rows=membership_rows,
         weight_rows=weight_rows,
@@ -168,6 +181,8 @@ def build_tushare_reference_db(
     return {
         "target_db": str(target_path),
         "benchmarks": [definition.benchmark_id for definition in benchmarks],
+        "index_basic_rows": len(index_basic_rows),
+        "raw_index_daily_rows": len(index_daily_rows),
         "industry_rows": len(industry_rows),
         "membership_rows": len(membership_rows),
         "weight_rows": len(weight_rows),
@@ -356,6 +371,75 @@ def _build_tushare_client(token: str) -> Any:
     import tushare as ts
 
     return ts.pro_api(token)
+
+
+def _fetch_index_basic_rows(
+    *,
+    client: Any,
+    benchmarks: list[BenchmarkReferenceDefinition],
+) -> list[tuple[str, str, str, str, str, str | None, float | None, str | None]]:
+    rows: dict[str, tuple[str, str, str, str, str, str | None, float | None, str | None]] = {}
+    for benchmark in benchmarks:
+        frame = client.index_basic(ts_code=benchmark.index_code)
+        for row in _dataframe_rows(frame):
+            ts_code = _clean_text(row.get("ts_code"))
+            if not ts_code:
+                continue
+            rows[ts_code] = (
+                ts_code,
+                _clean_text(row.get("name")),
+                _clean_text(row.get("market")),
+                _clean_text(row.get("publisher")),
+                _clean_text(row.get("category")),
+                _clean_date(row.get("base_date")),
+                _float_or_none(row.get("base_point")),
+                _clean_date(row.get("list_date")),
+            )
+    if not rows:
+        raise ValueError("Reference staging produced no index_basic rows.")
+    return [rows[ts_code] for ts_code in sorted(rows)]
+
+
+def _fetch_index_daily_rows(
+    *,
+    client: Any,
+    benchmarks: list[BenchmarkReferenceDefinition],
+    start_date: str,
+    end_date: str,
+) -> list[tuple[Any, ...]]:
+    rows: set[tuple[Any, ...]] = set()
+    for benchmark in benchmarks:
+        frame = client.index_daily(
+            ts_code=benchmark.index_code,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        for row in _dataframe_rows(frame):
+            ts_code = _clean_text(row.get("ts_code"))
+            trade_date = _clean_date(row.get("trade_date"))
+            close = _float_or_none(row.get("close"))
+            if not ts_code or not trade_date or close is None:
+                continue
+            rows.add(
+                (
+                    ts_code,
+                    trade_date,
+                    close,
+                    _float_or_none(row.get("open")),
+                    _float_or_none(row.get("high")),
+                    _float_or_none(row.get("low")),
+                    _float_or_none(row.get("pre_close")),
+                    _float_or_none(row.get("change")),
+                    _float_or_none(row.get("pct_chg")),
+                    _float_or_none(row.get("vol")),
+                    _float_or_none(row.get("amount")),
+                    "tushare.index_daily",
+                    None,
+                )
+            )
+    if not rows:
+        raise ValueError("Reference staging produced no index_daily rows.")
+    return sorted(rows, key=lambda item: (item[0], item[1]))
 
 
 def _fetch_index_member_all_records(
@@ -960,6 +1044,8 @@ def _deduplicate_market_event_tables(
 def _write_reference_db(
     *,
     target_path: Path,
+    index_basic_rows: list[tuple[str, str, str, str, str, str | None, float | None, str | None]],
+    raw_index_daily_rows: list[tuple[Any, ...]],
     industry_rows: list[tuple[str, str, str, str, str | None]],
     membership_rows: list[tuple[str, str, str, str | None]],
     weight_rows: list[tuple[str, str, str, float]],
@@ -973,6 +1059,39 @@ def _write_reference_db(
 
     conn = duckdb.connect(str(target_path))
     try:
+        conn.execute(
+            """
+            CREATE OR REPLACE TABLE index_basic_ref (
+                ts_code VARCHAR,
+                name VARCHAR,
+                market VARCHAR,
+                publisher VARCHAR,
+                category VARCHAR,
+                base_date VARCHAR,
+                base_point DOUBLE,
+                list_date VARCHAR
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE OR REPLACE TABLE raw_index_daily (
+                ts_code VARCHAR,
+                trade_date VARCHAR,
+                close DOUBLE,
+                open DOUBLE,
+                high DOUBLE,
+                low DOUBLE,
+                pre_close DOUBLE,
+                change DOUBLE,
+                pct_chg DOUBLE,
+                vol DOUBLE,
+                amount DOUBLE,
+                source_table VARCHAR,
+                ingested_at TIMESTAMP
+            )
+            """
+        )
         conn.execute(
             """
             CREATE OR REPLACE TABLE industry_classification_pit (
@@ -1081,6 +1200,8 @@ def _write_reference_db(
             )
             """
         )
+        conn.execute("DELETE FROM index_basic_ref")
+        conn.execute("DELETE FROM raw_index_daily")
         conn.execute("DELETE FROM industry_classification_pit")
         conn.execute("DELETE FROM benchmark_membership_pit")
         conn.execute("DELETE FROM benchmark_weight_snapshot_pit")
@@ -1089,6 +1210,14 @@ def _write_reference_db(
         conn.execute("DELETE FROM raw_suspend_d")
         conn.execute("DELETE FROM raw_share_float")
         conn.execute("DELETE FROM raw_repurchase")
+        conn.executemany(
+            "INSERT INTO index_basic_ref VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            index_basic_rows,
+        )
+        conn.executemany(
+            "INSERT INTO raw_index_daily VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            raw_index_daily_rows,
+        )
         conn.executemany(
             "INSERT INTO industry_classification_pit VALUES (?, ?, ?, ?, ?)",
             industry_rows,
@@ -1296,6 +1425,42 @@ def _write_reference_dataset_registry(
             FROM benchmark_weight_snapshot_pit
             """
         )
+    if _table_exists_current_db(conn, "index_basic_ref"):
+        row_count = conn.execute("SELECT COUNT(*) FROM index_basic_ref").fetchone()[0]
+        if row_count:
+            conn.execute(
+                """
+                INSERT INTO reference_dataset_registry
+                SELECT
+                    'index_basic_ref',
+                    'tushare',
+                    'pit_reference_staging',
+                    'green',
+                    COUNT(*),
+                    MIN(list_date),
+                    MAX(list_date),
+                    'staged benchmark index metadata for the V2 reference chain'
+                FROM index_basic_ref
+                """
+            )
+    if _table_exists_current_db(conn, "raw_index_daily"):
+        row_count = conn.execute("SELECT COUNT(*) FROM raw_index_daily").fetchone()[0]
+        if row_count:
+            conn.execute(
+                """
+                INSERT INTO reference_dataset_registry
+                SELECT
+                    'raw_index_daily',
+                    'tushare',
+                    'pit_reference_staging',
+                    'green',
+                    COUNT(*),
+                    MIN(trade_date),
+                    MAX(trade_date),
+                    'staged benchmark index daily bars for the V2 research chain'
+                FROM raw_index_daily
+                """
+            )
     for table_name, note in (
         ("raw_dividend", "staged Tushare dividend and bonus-share records for corporate-action ledger derivation"),
         ("raw_stk_limit", "staged Tushare daily up/down limit prices for tradeability state"),
@@ -2452,7 +2617,7 @@ def _resolve_official_sw_level_code(
 
 
 def _normalize_official_sw_security_id(value: Any) -> str:
-    text = _clean_text(value)
+    text = _clean_official_sw_code_text(value)
     if not text:
         return ""
     digits = "".join(character for character in text if character.isdigit())
@@ -2469,11 +2634,28 @@ def _normalize_official_sw_security_id(value: Any) -> str:
 
 
 def _normalize_official_sw_code(value: Any) -> str:
-    text = _clean_text(value)
+    text = _clean_official_sw_code_text(value)
     if not text:
         return ""
     digits = "".join(character for character in text if character.isdigit())
     return digits.zfill(6) if digits else ""
+
+
+def _clean_official_sw_code_text(value: Any) -> str:
+    if isinstance(value, Integral) and not isinstance(value, bool):
+        return str(int(value))
+    if isinstance(value, Real) and not isinstance(value, bool):
+        numeric_value = float(value)
+        if numeric_value != numeric_value:
+            return ""
+        if numeric_value.is_integer():
+            return str(int(numeric_value))
+
+    text = _clean_text(value)
+    whole, separator, fraction = text.partition(".")
+    if separator and whole.isdigit() and fraction and set(fraction) == {"0"}:
+        return whole
+    return text
 
 
 def _normalize_official_sw_timestamp(value: Any) -> str | None:

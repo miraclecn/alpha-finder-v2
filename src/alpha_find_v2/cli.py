@@ -45,6 +45,7 @@ from .benchmark_state_builder import (
 )
 from .reference_data_staging import (
     BenchmarkReferenceDefinition,
+    DEFAULT_MARKET_EVENT_PAGE_SIZE,
     build_tushare_reference_db,
 )
 from .portfolio_constructor import PortfolioConstructor
@@ -329,7 +330,7 @@ def _parse_args() -> argparse.Namespace:
 
     build_reference_staging_db = subparsers.add_parser(
         "build-reference-staging-db",
-        help="Build a supplemental DuckDB of PIT benchmark and industry reference tables from Tushare.",
+        help="Build a supplemental DuckDB of benchmark index, PIT benchmark, and industry reference tables from Tushare.",
     )
     build_reference_staging_db.add_argument(
         "--target-db",
@@ -364,6 +365,33 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         default=1,
         help="Month window size used to chunk index_weight requests and avoid Tushare truncation.",
+    )
+    build_reference_staging_db.add_argument(
+        "--stage-market-events",
+        action="store_true",
+        help="Also stage Tushare market-event tables used for corporate actions and tradeability.",
+    )
+    build_reference_staging_db.add_argument(
+        "--market-event-start-date",
+        default="",
+        help="Earliest market-event date to stage in YYYYMMDD format. Defaults to --start-date.",
+    )
+    build_reference_staging_db.add_argument(
+        "--market-event-end-date",
+        default="",
+        help="Latest market-event date to stage in YYYYMMDD format. Defaults to --end-date.",
+    )
+    build_reference_staging_db.add_argument(
+        "--market-event-page-size",
+        type=int,
+        default=DEFAULT_MARKET_EVENT_PAGE_SIZE,
+        help="Page size used for market-event Tushare requests.",
+    )
+    build_reference_staging_db.add_argument(
+        "--market-event-request-interval-seconds",
+        type=float,
+        default=0.0,
+        help="Optional sleep between market-event Tushare requests.",
     )
     build_reference_staging_db.add_argument(
         "--token",
@@ -928,6 +956,11 @@ def main() -> None:
             token=args.token or None,
             industry_levels=industry_levels,
             index_weight_window_months=args.index_weight_window_months,
+            stage_market_events=args.stage_market_events,
+            market_event_start_date=args.market_event_start_date or None,
+            market_event_end_date=args.market_event_end_date or None,
+            market_event_page_size=args.market_event_page_size,
+            market_event_request_interval_seconds=args.market_event_request_interval_seconds,
         )
         _dump_json(result)
         return

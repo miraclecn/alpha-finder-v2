@@ -160,7 +160,7 @@ alpha-find-v2 show-portfolio-construction-model --path config/portfolio_construc
 alpha-find-v2 show-risk-model --path config/risk_models/a_share_core_equity.toml
 alpha-find-v2 show-target --path config/targets/open_t1_to_open_t20_residual_net_cost.toml
 alpha-find-v2 show-decay-monitor --path config/decay_monitors/a_share_core_watch.toml
-alpha-find-v2 build-reference-staging-db --target-db output/pit_reference_staging.duckdb --start-date 20140101 --benchmark "CSI 800=000906.SH"
+alpha-find-v2 build-reference-staging-db --target-db output/pit_reference_staging.duckdb --start-date 20140101 --benchmark "CSI 800=000906.SH" --stage-market-events
 alpha-find-v2 build-research-source-db --source-db output/raw.duckdb --supplemental-db output/pit_reference_staging.duckdb --target-db output/research_source.duckdb
 alpha-find-v2 build-benchmark-state --case research/examples/benchmark_state_build_minimal/csi800.toml
 alpha-find-v2 build-trend-research-input --case research/examples/trend_input_build_minimal/trend_leadership_core.toml
@@ -179,7 +179,8 @@ alpha-find-v2 evaluate-decay-watch --case research/examples/deployment_minimal/d
 
 Notes:
 
-- `build-reference-staging-db` stages official `index_weight` snapshots and SW2021 `index_member_all` history for the CSI 800 benchmark case.
+- `build-reference-staging-db` now also stages benchmark `index_basic` metadata and `index_daily` history alongside official `index_weight` snapshots and SW2021 `index_member_all` history.
+- `build-reference-staging-db --stage-market-events` additionally stages Tushare event tables used for corporate-action and tradeability derivation.
 - `research/examples/trend_input_build_minimal/trend_leadership_core.toml` enables `cn_a_directional_open_lock` so generated trend artifacts respect A-share open-limit trade blocks.
 - The current honest CSI 800 + `sw2021_l1` replay window begins on `2025-08-29` because earlier benchmark constituents still have missing staged SW2021 classification coverage.
 - The real-output promotion replay lane compares generated `trend_leadership_core` and `trend_resilience_core` artifacts on that same `2025-08-29+` weekly calendar.

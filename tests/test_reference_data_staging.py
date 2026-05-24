@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import duckdb
 import pandas as pd
@@ -14,6 +16,8 @@ OPENPYXL_AVAILABLE = importlib.util.find_spec("openpyxl") is not None
 
 class _FakeTushareClient:
     def __init__(self) -> None:
+        self.index_basic_calls: list[dict[str, object]] = []
+        self.index_daily_calls: list[dict[str, object]] = []
         self.member_calls: list[dict[str, object]] = []
         self.weight_calls: list[dict[str, object]] = []
         self.dividend_calls: list[dict[str, object]] = []
@@ -21,6 +25,87 @@ class _FakeTushareClient:
         self.suspend_d_calls: list[dict[str, object]] = []
         self.share_float_calls: list[dict[str, object]] = []
         self.repurchase_calls: list[dict[str, object]] = []
+
+    def index_basic(self, **kwargs: object) -> pd.DataFrame:
+        self.index_basic_calls.append(dict(kwargs))
+        ts_code = str(kwargs.get("ts_code", ""))
+        if ts_code == "000906.SH":
+            return pd.DataFrame(
+                [
+                    {
+                        "ts_code": "000906.SH",
+                        "name": "中证800",
+                        "market": "CSI",
+                        "publisher": "中证指数有限公司",
+                        "category": "规模指数",
+                        "base_date": "20041231",
+                        "base_point": 1000.0,
+                        "list_date": "20050105",
+                    }
+                ]
+            )
+        return pd.DataFrame(
+            columns=[
+                "ts_code",
+                "name",
+                "market",
+                "publisher",
+                "category",
+                "base_date",
+                "base_point",
+                "list_date",
+            ]
+        )
+
+    def index_daily(self, **kwargs: object) -> pd.DataFrame:
+        self.index_daily_calls.append(dict(kwargs))
+        ts_code = str(kwargs.get("ts_code", ""))
+        if ts_code != "000906.SH":
+            return pd.DataFrame(
+                columns=[
+                    "ts_code",
+                    "trade_date",
+                    "close",
+                    "open",
+                    "high",
+                    "low",
+                    "pre_close",
+                    "change",
+                    "pct_chg",
+                    "vol",
+                    "amount",
+                ]
+            )
+        return pd.DataFrame(
+            [
+                {
+                    "ts_code": "000906.SH",
+                    "trade_date": "20240102",
+                    "close": 5010.0,
+                    "open": 5000.0,
+                    "high": 5025.0,
+                    "low": 4995.0,
+                    "pre_close": 4980.0,
+                    "change": 30.0,
+                    "pct_chg": 0.6024,
+                    "vol": 123456.0,
+                    "amount": 789012.0,
+                },
+                {
+                    "ts_code": "000906.SH",
+                    "trade_date": "20240103",
+                    "close": 5030.0,
+                    "open": 5015.0,
+                    "high": 5040.0,
+                    "low": 5005.0,
+                    "pre_close": 5010.0,
+                    "change": 20.0,
+                    "pct_chg": 0.3992,
+                    "vol": 135790.0,
+                    "amount": 880000.0,
+                },
+            ]
+        )
 
     def index_member_all(self, **kwargs: object) -> pd.DataFrame:
         self.member_calls.append(dict(kwargs))
@@ -267,6 +352,170 @@ class _FakeTushareClient:
 
 
 class ReferenceDataStagingTest(unittest.TestCase):
+    def test_official_sw_numeric_excel_values_normalize_without_decimal_artifacts(self) -> None:
+        from alpha_find_v2.reference_data_staging import (
+            _normalize_official_sw_code,
+            _normalize_official_sw_security_id,
+        )
+
+        self.assertEqual(_normalize_official_sw_security_id(1.0), "000001.SZ")
+        self.assertEqual(_normalize_official_sw_security_id(600651.0), "600651.SH")
+        self.assertEqual(_normalize_official_sw_code(640301.0), "640301")
+
+    def test_cli_build_reference_staging_db_passes_market_event_options(self) -> None:
+        from alpha_find_v2 import cli
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_db = Path(temp_dir) / "pit_reference.duckdb"
+            argv = [
+                "alpha-find-v2",
+                "build-reference-staging-db",
+                "--target-db",
+                str(target_db),
+                "--start-date",
+                "20240101",
+                "--end-date",
+                "20240131",
+                "--benchmark",
+                "CSI 800=000906.SH",
+                "--stage-market-events",
+                "--market-event-start-date",
+                "20240510",
+                "--market-event-end-date",
+                "20240511",
+                "--market-event-page-size",
+                "123",
+                "--market-event-request-interval-seconds",
+                "0.25",
+            ]
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch(
+                    "alpha_find_v2.cli.build_tushare_reference_db",
+                    return_value={"target_db": str(target_db)},
+                ) as build_reference,
+                mock.patch("alpha_find_v2.cli._dump_json"),
+            ):
+                cli.main()
+
+        kwargs = build_reference.call_args.kwargs
+        self.assertTrue(kwargs["stage_market_events"])
+        self.assertEqual(kwargs["market_event_start_date"], "20240510")
+        self.assertEqual(kwargs["market_event_end_date"], "20240511")
+        self.assertEqual(kwargs["market_event_page_size"], 123)
+        self.assertEqual(kwargs["market_event_request_interval_seconds"], 0.25)
+
+    def test_build_tushare_reference_db_stages_index_daily_truth(self) -> None:
+        from alpha_find_v2.reference_data_staging import (
+            BenchmarkReferenceDefinition,
+            build_tushare_reference_db,
+        )
+
+        client = _FakeTushareClient()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_db = Path(temp_dir) / "pit_reference.duckdb"
+
+            summary = build_tushare_reference_db(
+                target_db=target_db,
+                benchmarks=[
+                    BenchmarkReferenceDefinition(
+                        benchmark_id="CSI 800",
+                        index_code="000906.SH",
+                    )
+                ],
+                start_date="20240101",
+                end_date="20240131",
+                client=client,
+                member_page_size=2,
+            )
+
+            self.assertEqual(summary["index_basic_rows"], 1)
+            self.assertEqual(summary["raw_index_daily_rows"], 2)
+            self.assertEqual(
+                client.index_basic_calls,
+                [{"ts_code": "000906.SH"}],
+            )
+            self.assertEqual(
+                client.index_daily_calls,
+                [{"ts_code": "000906.SH", "start_date": "20240101", "end_date": "20240131"}],
+            )
+
+            conn = duckdb.connect(str(target_db), read_only=True)
+            try:
+                index_basic_rows = conn.execute(
+                    """
+                    SELECT ts_code, name, market, publisher, category, list_date
+                    FROM index_basic_ref
+                    """
+                ).fetchall()
+                self.assertEqual(
+                    index_basic_rows,
+                    [
+                        (
+                            "000906.SH",
+                            "中证800",
+                            "CSI",
+                            "中证指数有限公司",
+                            "规模指数",
+                            "20050105",
+                        )
+                    ],
+                )
+                index_daily_rows = conn.execute(
+                    """
+                    SELECT
+                        ts_code,
+                        trade_date,
+                        open,
+                        high,
+                        low,
+                        close,
+                        pre_close,
+                        change,
+                        pct_chg,
+                        vol,
+                        amount,
+                        source_table
+                    FROM raw_index_daily
+                    ORDER BY trade_date
+                    """
+                ).fetchall()
+                self.assertEqual(
+                    index_daily_rows,
+                    [
+                        (
+                            "000906.SH",
+                            "20240102",
+                            5000.0,
+                            5025.0,
+                            4995.0,
+                            5010.0,
+                            4980.0,
+                            30.0,
+                            0.6024,
+                            123456.0,
+                            789012.0,
+                            "tushare.index_daily",
+                        ),
+                        (
+                            "000906.SH",
+                            "20240103",
+                            5015.0,
+                            5040.0,
+                            5005.0,
+                            5030.0,
+                            5010.0,
+                            20.0,
+                            0.3992,
+                            135790.0,
+                            880000.0,
+                            "tushare.index_daily",
+                        ),
+                    ],
+                )
+            finally:
+                conn.close()
+
     def test_build_tushare_reference_db_stages_corporate_actions_and_tradeability(self) -> None:
         from alpha_find_v2.reference_data_staging import (
             BenchmarkReferenceDefinition,
@@ -339,6 +588,7 @@ class ReferenceDataStagingTest(unittest.TestCase):
                 registry_rows,
                 [
                     ("raw_dividend", 3),
+                    ("raw_index_daily", 2),
                     ("raw_repurchase", 1),
                     ("raw_share_float", 1),
                     ("raw_stk_limit", 1),
@@ -921,6 +1171,41 @@ class ReferenceDataStagingTest(unittest.TestCase):
         )
 
         class _OverlappingIndustryClient:
+            def index_basic(self, **kwargs: object) -> pd.DataFrame:
+                return pd.DataFrame(
+                    [
+                        {
+                            "ts_code": "000906.SH",
+                            "name": "中证800",
+                            "market": "CSI",
+                            "publisher": "中证指数有限公司",
+                            "category": "规模指数",
+                            "base_date": "20041231",
+                            "base_point": 1000.0,
+                            "list_date": "20050105",
+                        }
+                    ]
+                )
+
+            def index_daily(self, **kwargs: object) -> pd.DataFrame:
+                return pd.DataFrame(
+                    [
+                        {
+                            "ts_code": "000906.SH",
+                            "trade_date": "20260331",
+                            "close": 6000.0,
+                            "open": 5980.0,
+                            "high": 6010.0,
+                            "low": 5970.0,
+                            "pre_close": 5975.0,
+                            "change": 25.0,
+                            "pct_chg": 0.4184,
+                            "vol": 100000.0,
+                            "amount": 500000.0,
+                        }
+                    ]
+                )
+
             def index_member_all(self, **kwargs: object) -> pd.DataFrame:
                 offset = int(kwargs.get("offset", 0))
                 if offset > 0:
@@ -1079,12 +1364,30 @@ class ReferenceDataStagingTest(unittest.TestCase):
                         "20240229",
                     ),
                     (
+                        "index_basic_ref",
+                        "tushare",
+                        "pit_reference_staging",
+                        "green",
+                        1,
+                        "20050105",
+                        "20050105",
+                    ),
+                    (
                         "industry_classification_pit",
                         "tushare",
                         "pit_reference_staging",
                         "green",
                         9,
                         "20200101",
+                        "20240103",
+                    ),
+                    (
+                        "raw_index_daily",
+                        "tushare",
+                        "pit_reference_staging",
+                        "green",
+                        2,
+                        "20240102",
                         "20240103",
                     ),
                 ],

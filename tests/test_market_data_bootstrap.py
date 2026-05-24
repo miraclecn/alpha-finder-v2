@@ -347,6 +347,39 @@ def _create_supplemental_pit_db(path: Path) -> None:
     )
     conn.execute(
         """
+        CREATE TABLE index_basic_ref (
+            ts_code VARCHAR,
+            name VARCHAR,
+            market VARCHAR,
+            publisher VARCHAR,
+            category VARCHAR,
+            base_date VARCHAR,
+            base_point DOUBLE,
+            list_date VARCHAR
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE raw_index_daily (
+            ts_code VARCHAR,
+            trade_date VARCHAR,
+            close DOUBLE,
+            open DOUBLE,
+            high DOUBLE,
+            low DOUBLE,
+            pre_close DOUBLE,
+            change DOUBLE,
+            pct_chg DOUBLE,
+            vol DOUBLE,
+            amount DOUBLE,
+            source_table VARCHAR,
+            ingested_at TIMESTAMP
+        )
+        """
+    )
+    conn.execute(
+        """
         INSERT INTO industry_classification_pit VALUES
         ('000001.SZ', 'citics_l1', 'bank', '20200101', NULL),
         ('300001.SZ', 'citics_l1', 'industrial', '20200101', NULL),
@@ -368,6 +401,19 @@ def _create_supplemental_pit_db(path: Path) -> None:
         ('CSI 800', '300001.SZ', '20240102', 35.0),
         ('CSI 800', '000001.SZ', '20240103', 55.0),
         ('CSI 800', '688001.SH', '20240103', 45.0)
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO index_basic_ref VALUES
+        ('000906.SH', '中证800', 'CSI', '中证指数有限公司', '规模指数', '20041231', 1000.0, '20050105')
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO raw_index_daily VALUES
+        ('000906.SH', '20240102', 5010.0, 5000.0, 5025.0, 4995.0, 4980.0, 30.0, 0.6024, 123456.0, 789012.0, 'tushare.index_daily', TIMESTAMP '2026-04-22 15:00:00'),
+        ('000906.SH', '20240103', 5030.0, 5015.0, 5040.0, 5005.0, 5010.0, 20.0, 0.3992, 135790.0, 880000.0, 'tushare.index_daily', TIMESTAMP '2026-04-22 15:00:00')
         """
     )
     conn.close()
@@ -876,6 +922,89 @@ class MarketDataBootstrapTest(unittest.TestCase):
                 ],
             )
             conn.close()
+
+    def test_build_research_source_db_imports_staged_index_daily_truth(self) -> None:
+        from alpha_find_v2.market_data_bootstrap import build_research_source_db
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            source_db = temp_root / "source.duckdb"
+            supplemental_db = temp_root / "supplemental.duckdb"
+            target_db = temp_root / "target.duckdb"
+            _create_source_db(source_db)
+            _create_supplemental_pit_db(supplemental_db)
+
+            build_research_source_db(
+                source_db,
+                target_db,
+                supplemental_db=supplemental_db,
+            )
+
+            conn = duckdb.connect(str(target_db), read_only=True)
+            try:
+                registry_rows = conn.execute(
+                    """
+                    SELECT dataset_id, status
+                    FROM dataset_registry
+                    WHERE dataset_id IN ('index_basic_ref', 'index_daily_bar_pit')
+                    ORDER BY dataset_id
+                    """
+                ).fetchall()
+                self.assertEqual(
+                    registry_rows,
+                    [
+                        ("index_basic_ref", "green"),
+                        ("index_daily_bar_pit", "green"),
+                    ],
+                )
+                index_rows = conn.execute(
+                    """
+                    SELECT
+                        index_code,
+                        trade_date,
+                        open,
+                        high,
+                        low,
+                        close,
+                        pre_close,
+                        volume,
+                        turnover_value,
+                        source_table
+                    FROM index_daily_bar_pit
+                    ORDER BY trade_date
+                    """
+                ).fetchall()
+                self.assertEqual(
+                    index_rows,
+                    [
+                        (
+                            "000906.SH",
+                            "20240102",
+                            5000.0,
+                            5025.0,
+                            4995.0,
+                            5010.0,
+                            4980.0,
+                            123456.0,
+                            789012.0,
+                            "tushare.index_daily",
+                        ),
+                        (
+                            "000906.SH",
+                            "20240103",
+                            5015.0,
+                            5040.0,
+                            5005.0,
+                            5030.0,
+                            5010.0,
+                            135790.0,
+                            880000.0,
+                            "tushare.index_daily",
+                        ),
+                    ],
+                )
+            finally:
+                conn.close()
 
     def test_build_research_source_db_writes_phase1_boundary_registries(self) -> None:
         from alpha_find_v2.market_data_bootstrap import build_research_source_db
